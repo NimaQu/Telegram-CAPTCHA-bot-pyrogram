@@ -11,12 +11,12 @@ from configparser import ConfigParser
 from pyrogram import Client, filters
 from pyrogram.enums import ChatMemberStatus
 from pyrogram.errors import ChatAdminRequired, ChannelPrivate, MessageNotModified, RPCError, BadRequest, \
-    MessageDeleteForbidden
+    MessageDeleteForbidden, UserNotParticipant
 from pyrogram.enums.chat_members_filter import ChatMembersFilter
 from pyrogram.enums.message_service_type import MessageServiceType
 from pyrogram.enums.chat_type import ChatType
 from pyrogram.types import (InlineKeyboardMarkup, User, Message, ChatPermissions, CallbackQuery,
-                            ChatMemberUpdated, ChatMember)
+                            ChatMemberUpdated, ChatMember, Chat)
 from Timer import Timer
 from challenge.math import Math
 from challenge.recaptcha import ReCAPTCHA
@@ -435,6 +435,7 @@ def _update(app):
                     await asyncio.sleep(1)
                     await client.unban_chat_member(chat_id, target.id)
                     logging.info(f"{target.id} unbanned")
+                    asyncio.create_task(ensure_user_got_banned(client, message.chat, user_id))
                     db.update_last_try(current_time, target.id)
                     db.try_count_plus_one(target.id)
                     try_count = int(db.get_try_count(target.id))
@@ -749,6 +750,8 @@ def _update(app):
                 await client.unban_chat_member(chat_id, user_id)
                 logging.info(f"{user_id} unbanned")
 
+                asyncio.create_task(ensure_user_got_banned(client, callback_query.message.chat, user_id))
+
             if group_config["delete_failed_challenge"]:
                 Timer(
                     client.delete_messages(chat_id, msg_id),
@@ -800,6 +803,8 @@ def _update(app):
             await asyncio.sleep(1)
             await client.unban_chat_member(chat_id, from_id)
             logging.info(f"{from_id} unbanned")
+
+            asyncio.create_task(ensure_user_got_banned(client, message.chat, user_id))
         else:
             pass
 
@@ -811,6 +816,25 @@ def _update(app):
 
         if group_config["enable_global_blacklist"]:
             db.new_blacklist(datetime.now(), from_id)
+
+    async def ensure_user_got_banned(client: Client, chat: Chat, user_id: int):
+        # 当前有验证任务，就不用判断了
+        ch_id, ch_data = _current_challenges.get_by_user_and_chat_id(user_id, chat.id)
+        if ch_data:
+            challenge, target_id, timeout_event = ch_data
+            if not isinstance(challenge, AutoKickCache):
+                return
+        try:
+            # 查询用户是否还在群组内
+            member = await chat.get_member(user_id)
+            if member.status == ChatMemberStatus.MEMBER:
+                logging.error(f"{user_id} is still in the group {chat.id}, muted")
+                await client.restrict_chat_member(chat.id, user_id, ChatPermissions(can_send_messages=False))
+                await client.send_message(chat_id=_channel,
+                                          text=f"#DIRTY_PATCH\n[用户](tg://user?id={user_id}) ID: `{user_id}` \n事件: 检测到踢出后仍然在群组中，已禁言待处理.\n群组 ID: `{chat.id}`\n群组标题: `{chat.title}`")
+        except UserNotParticipant:
+            logging.info(f"{user_id} is not in the group {chat.id}, no need to mute")
+            return # 用户已经不在群组内
 
 
 def _main():
