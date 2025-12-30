@@ -369,7 +369,7 @@ def _update(app):
     @app.on_message(filters.group | filters.service)
     # delete service message and message send from pending validation user
     async def delete_service_message(client: Client, message: Message):
-        service_message_need_delete = [MessageServiceType.NEW_CHAT_MEMBERS, MessageServiceType.LEFT_CHAT_MEMBERS]
+        service_message_need_delete = [MessageServiceType.NEW_CHAT_MEMBERS, MessageServiceType.LEFT_CHAT_MEMBER]
         if message.service:
             if message.service in service_message_need_delete:
                 try:
