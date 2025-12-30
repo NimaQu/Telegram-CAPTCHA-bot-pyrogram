@@ -44,12 +44,25 @@ private_math_challenge_filter = filters.create(lambda _, __, query: "|" in query
 '''
 cf = ConfigParser()  # 启用ConfigParser读取那些启动后即不会再被更改的数据，如BotToken等
 cf.read("config.ini", encoding="utf-8")
-_admin_user = cf.getint("bot", "admin")
+
+_admin_config = cf.get("bot", "admin")
+if ',' in _admin_config:
+    # 多个管理员ID，用逗号分隔
+    _admin_users = [int(admin_id.strip()) for admin_id in _admin_config.split(',')]
+else:
+    # 单个管理员ID
+    _admin_users = [int(_admin_config)]
+
 _token = cf.get("bot", "token")
 _api_id = cf.getint("bot", "api_id")
 _api_hash = cf.get("bot", "api_hash")
 _channel = cf.getint("bot", "channel")
 logging.basicConfig(level=logging.INFO)
+
+
+def is_admin(user_id: int) -> bool:
+    """检查用户是否为管理员"""
+    return user_id in _admin_users
 
 
 # 设置一下日志记录，能够在诸如 systemctl status captchabot 这样的地方获得详细输出。
@@ -119,12 +132,12 @@ def _update(app):
     async def reload_cfg(client: Client, message: Message):
         _me: User = await client.get_me()
         logging.info(message.text)
-        if message.from_user.id == _admin_user:
+        if is_admin(message.from_user.id):
             save_config()
             load_config()
             await message.reply("配置已成功重载。")
         else:
-            logging.info("Permission denied, admin user in config is:" + str(_admin_user))
+            logging.info("Permission denied, admin users in config are:" + str(_admin_users))
             pass
 
     @app.on_message(filters.command("help") & filters.group)
@@ -189,7 +202,7 @@ def _update(app):
     @app.on_message(filters.command("leave") & filters.private)
     async def leave_command(client: Client, message: Message):
         chat_id = message.text.split()[-1]
-        if message.from_user.id == _admin_user:
+        if is_admin(message.from_user.id):
             try:
                 await client.send_message(int(chat_id),
                                           _config["msg_leave_msg"])
@@ -212,7 +225,7 @@ def _update(app):
 
     @app.on_message(filters.command("clean") & filters.private)
     async def clean_database(client: Client, message: Message):
-        if message.from_user.id == _admin_user:
+        if is_admin(message.from_user.id):
             failed_count = success_count = 0
             deleted_users = []
             user_id_list = db.get_all_user_ids()
@@ -233,7 +246,7 @@ def _update(app):
             await message.reply(
                 "已成功清除{}个已经删号的用户，共有{}个用户信息获取失败。".format(success_count, failed_count))
         else:
-            logging.info("Permission denied, admin user in config is:" + str(_admin_user))
+            logging.info("Permission denied, admin users in config are:" + str(_admin_users))
             return
 
     @app.on_message(filters.command("faset") & filters.group)
@@ -336,7 +349,7 @@ def _update(app):
         if len(message.command) != 2:
             await message.reply("使用方法: /getlog [challenge_id]")
             return
-        if message.from_user.id != _admin_user:
+        if not is_admin(message.from_user.id):
             return
         logs = db.get_logs_by_challenge_id(message.command[1])
         if len(logs) == 0:
@@ -350,7 +363,7 @@ def _update(app):
 
     @app.on_message(filters.private & filters.forwarded)
     async def get_user_record(client: Client, message: Message):
-        if message.from_user.id != _admin_user:
+        if not is_admin(message.from_user.id):
             return
         if message.forward_from is None:
             await message.reply("该消息用户为频道或关闭了消息转发权限")
