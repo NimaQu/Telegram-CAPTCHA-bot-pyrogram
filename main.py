@@ -336,7 +336,7 @@ def _update(app):
         result = await chk_message(api_key="sk-", message=reply_message, image_url=image_url, max_token=512)
         if result.possibility > 85:
             logging.info(f"AI 判断为垃圾消息，概率为 {result.possibility}%")
-            await client.ban_chat_member(message.chat.id, reply_message.chat.id if reply_message.from_user is None else reply_message.from_user.id, revoke_messages=True)
+            await client.ban_chat_member(message.chat.id, reply_message.chat.id if reply_message.from_user is None else reply_message.from_user.id)
 
     @app.on_message(filters.private & filters.command("sender"))
     async def get_message_info(client: Client, message: Message):
@@ -461,7 +461,7 @@ def _update(app):
         failed_users = []
         for user_id in user_ids:
             try:
-                await client.ban_chat_member(group_id, user_id, revoke_messages=True)
+                await client.ban_chat_member(group_id, user_id)
                 success_count += 1
             except ChatAdminRequired:
                 await message.reply("封禁失败: Bot 在该群没有封禁用户权限")
@@ -607,7 +607,7 @@ def _update(app):
                     )
                     _current_challenges[challenge_id] = (challenge, message.from_user.id, timeout_event)
 
-                    await client.ban_chat_member(chat_id, target.id, until_date=current_time + timedelta(seconds=31), revoke_messages=True)
+                    await client.ban_chat_member(chat_id, target.id, until_date=current_time + timedelta(seconds=31))
                     db.update_last_try(current_time, target.id)
                     db.try_count_plus_one(target.id)
                     try_count = int(db.get_try_count(target.id))
@@ -847,7 +847,7 @@ def _update(app):
                     logging.error(str(e))
             else:
                 try:
-                    await client.ban_chat_member(chat_id, target_id, revoke_messages=True)
+                    await client.ban_chat_member(chat_id, target_id)
                 except ChatAdminRequired:
                     await client.answer_callback_query(
                         query_id, group_config["msg_bot_no_permission"])
@@ -974,10 +974,10 @@ def _update(app):
                 return
 
             if group_config["challenge_failed_action"] == FailedAction.ban:
-                await client.ban_chat_member(chat_id, user_id, revoke_messages=True)
+                await client.ban_chat_member(chat_id, user_id)
             else:
                 # kick
-                await client.ban_chat_member(chat_id, user_id, until_date=datetime.now() + timedelta(seconds=31), revoke_messages=True)
+                await client.ban_chat_member(chat_id, user_id, until_date=datetime.now() + timedelta(seconds=31))
                 logging.info(f"{user_id} unbanned")
 
             if group_config["delete_failed_challenge"]:
@@ -1059,7 +1059,7 @@ def _update(app):
         if group_config["challenge_timeout_action"] == FailedAction.ban:
             await client.ban_chat_member(chat_id, from_id, revoke_messages=True)
         elif group_config["challenge_timeout_action"] == FailedAction.kick:
-            await client.ban_chat_member(chat_id, from_id, until_date=datetime.now() + timedelta(seconds=31), revoke_messages=True)
+            await client.ban_chat_member(chat_id, from_id, until_date=datetime.now() + timedelta(seconds=31))
             logging.info(f"{from_id} unbanned")
         else:
             pass
