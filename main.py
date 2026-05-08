@@ -1,10 +1,7 @@
-# !/usr/bin/env python3
-# -*- coding: UTF-8 -*-
 import asyncio
 import json
 import logging
 import threading
-# import time
 from datetime import datetime, timedelta
 from configparser import ConfigParser
 
