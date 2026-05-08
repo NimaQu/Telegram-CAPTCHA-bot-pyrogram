@@ -15,6 +15,29 @@ _config = dict()
 _channel = 0
 
 
+@app.after_request
+def add_response_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' https://challenges.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "frame-src https://challenges.cloudflare.com; "
+        "connect-src 'self' https://challenges.cloudflare.com; "
+        "form-action 'self'; "
+        "base-uri 'none'; "
+        "frame-ancestors 'none'"
+    )
+    response.headers.pop("Cache-Control", None)
+    response.headers.pop("Pragma", None)
+    return response
+
+
 @app.route("/")
 def root():
     return render_template('index.html')
@@ -44,7 +67,10 @@ async def verify():
     challenge, target_id, timeout_event = challenge_data
     join_request = False
     if challenge.message.chat.id == target_id:
-        chat_id = ch_id.split("|")[0]
+        try:
+            chat_id = int(ch_id.split("|")[0])
+        except ValueError:
+            logging.error(f"Invalid chat_id in challenge data: {ch_id}")
         chat = await client.get_chat(chat_id)
         chat_title = chat.title
         join_request = True
@@ -71,7 +97,6 @@ async def verify():
                         target_id,
                         permissions=ChatPermissions(
                             can_send_messages=True,
-                            can_send_media_messages=True,
                             can_send_other_messages=True,
                             can_send_polls=True,
                             can_add_web_page_previews=True,

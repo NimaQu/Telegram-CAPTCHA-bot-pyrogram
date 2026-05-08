@@ -1,28 +1,48 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
-    <title>验证结果页</title>
-    <style>
-        .result{
-            margin-top: 20px;
-            display: flex;
-            justify-content: center;
-        }
-    </style>
-    <meta name="viewport"
-      content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex,nofollow">
+    <title>验证结果</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
 </head>
 <body>
-{% with messages = get_flashed_messages() %}
-    {% if messages %}
-        <ul class=flashes>
-            {% for message in messages %}
-                <div class="result"><h2>{{ message }}</h2></div>
-            {% endfor %}
-        </ul>
-    {% endif %}
-{% endwith %}
+<main class="shell">
+    <header class="topbar">
+        <div class="brand">
+            <span class="mark" aria-hidden="true"></span>
+            <div class="brand-text">
+                <span class="brand-title">Telegram CAPTCHA Bot</span>
+                <span class="brand-subtitle">Verification result</span>
+            </div>
+        </div>
+        <span class="status-pill">Request complete</span>
+    </header>
+
+    <section class="result-wrap">
+        <div class="panel result-panel">
+            <span class="result-symbol" aria-hidden="true"></span>
+            <div class="section-title">
+                <div class="eyebrow">Result</div>
+                <h1>验证结果</h1>
+            </div>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    <ul class="message-list" aria-live="polite">
+                        {% for category, message in messages %}
+                            <li class="notice {{ category }}">{{ message }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="notice">当前没有可显示的验证结果。</p>
+                {% endif %}
+            {% endwith %}
+
+            <p class="quiet">这个页面不会保存验证状态。需要重新验证时，请回到 Telegram 使用新的验证链接。</p>
+        </div>
+    </section>
+</main>
 </body>
 </html>
-

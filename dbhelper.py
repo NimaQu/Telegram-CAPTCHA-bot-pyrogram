@@ -1,6 +1,8 @@
 import datetime
 import logging
 
+from sqlalchemy import func
+
 from db import SessionFactory
 from model import GroupConfig, BlacklistUser, RecaptchaLog, RecaptchaLogAction
 
@@ -177,6 +179,34 @@ def get_logs_by_ip(ip_addr):
         return logs
 
 
+def get_passed_users_by_ip(ip_addr):
+    with SessionFactory() as session:
+        last_passed_at = func.max(RecaptchaLog.created_at).label("last_passed_at")
+        logs = session.query(
+            RecaptchaLog.group_id,
+            RecaptchaLog.user_id,
+            last_passed_at
+        ).filter_by(
+            ip_addr=ip_addr,
+            action=RecaptchaLogAction.Passed
+        ).group_by(
+            RecaptchaLog.group_id,
+            RecaptchaLog.user_id
+        ).order_by(
+            last_passed_at.desc()
+        ).all()
+        return [(log.group_id, log.user_id, log.last_passed_at) for log in logs]
+
+
+def get_passed_user_ids_by_ip_and_group(ip_addr, group_id):
+    with SessionFactory() as session:
+        user_ids = session.query(RecaptchaLog.user_id).filter_by(
+            ip_addr=ip_addr,
+            group_id=group_id,
+            action=RecaptchaLogAction.Passed
+        ).distinct().all()
+        return [user_id for user_id, in user_ids]
+
+
 if __name__ == '__main__':
-    delete_users_by_id(123456789)
     ...

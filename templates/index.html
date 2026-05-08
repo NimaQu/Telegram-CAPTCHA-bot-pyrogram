@@ -1,1 +1,53 @@
-<h1>Hello World!</h1>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex,nofollow">
+    <title>Captcha Bot Status</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
+</head>
+<body>
+<main class="shell">
+    <header class="topbar">
+        <div class="brand">
+            <span class="mark" aria-hidden="true"></span>
+            <div class="brand-text">
+                <span class="brand-title">Telegram CAPTCHA Bot</span>
+                <span class="brand-subtitle">Verification gateway</span>
+            </div>
+        </div>
+        <span class="status-pill">HTTP service online</span>
+    </header>
+
+    <section class="hero" aria-labelledby="status-title">
+        <div class="copy">
+            <div class="eyebrow">Public status page</div>
+            <h1 id="status-title">验证服务正在运行</h1>
+            <p class="lead">这里不提供公开验证入口。请从 Telegram 群组或机器人私聊中的专用链接继续完成验证。</p>
+        </div>
+
+        <aside class="panel status-panel" aria-label="Service status">
+            <dl class="metric-list">
+                <div class="metric">
+                    <dt>服务状态</dt>
+                    <dd>Online</dd>
+                </div>
+                <div class="metric">
+                    <dt>公开 API</dt>
+                    <dd>Disabled</dd>
+                </div>
+                <div class="metric">
+                    <dt>验证入口</dt>
+                    <dd>Private challenge link only</dd>
+                </div>
+                <div class="metric">
+                    <dt>页面缓存</dt>
+                    <dd>5 minutes</dd>
+                </div>
+            </dl>
+        </aside>
+    </section>
+</main>
+</body>
+</html>

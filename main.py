@@ -4,6 +4,7 @@ import logging
 import threading
 from datetime import datetime, timedelta
 from configparser import ConfigParser
+from ipaddress import ip_address
 
 from pyrogram import Client, filters
 from pyrogram.enums import ChatMemberStatus
@@ -13,7 +14,7 @@ from pyrogram.enums.chat_members_filter import ChatMembersFilter
 from pyrogram.enums.message_service_type import MessageServiceType
 from pyrogram.enums.chat_type import ChatType
 from pyrogram.types import (InlineKeyboardMarkup, User, Message, ChatPermissions, CallbackQuery,
-                            ChatMemberUpdated, ChatMember, Chat)
+                            ChatMemberUpdated, ChatMember, Chat, ChatJoinRequest)
 from Timer import Timer
 from challenge.math import Math
 from challenge.recaptcha import ReCAPTCHA
@@ -124,6 +125,31 @@ def extract_ids(url: str) -> (int | str, int):
         message_id = int(path.split('/')[-1])
         return chat_id, message_id
 
+
+def is_valid_ip_addr(value: str) -> bool:
+    try:
+        ip_address(value)
+        return True
+    except ValueError:
+        return False
+
+
+def split_long_message(text: str, max_length: int = 3900) -> list[str]:
+    chunks = []
+    current = ""
+    for line in text.splitlines(keepends=True):
+        if len(current) + len(line) > max_length:
+            if current:
+                chunks.append(current)
+                current = ""
+            while len(line) > max_length:
+                chunks.append(line[:max_length])
+                line = line[max_length:]
+        current += line
+    if current:
+        chunks.append(current)
+    return chunks
+
 def _update(app):
     @app.on_message(filters.command("reload") & filters.private)
     async def reload_cfg(client: Client, message: Message):
@@ -151,11 +177,12 @@ def _update(app):
     @app.on_message(filters.command("start") & filters.private)
     async def start_command(client: Client, message: Message):
         user_id = message.from_user.id
-        if len(message.command) != 2:
+        command = message.command
+        if not command or len(command) != 2:
             await message.reply(_start_message)
             return
         try:
-            from_chat_id = int(message.command[1])
+            from_chat_id = int(command[1])
         except ValueError:
             await message.reply(_start_message)
             return
@@ -309,7 +336,7 @@ def _update(app):
         result = await chk_message(api_key="sk-", message=reply_message, image_url=image_url, max_token=512)
         if result.possibility > 85:
             logging.info(f"AI 判断为垃圾消息，概率为 {result.possibility}%")
-            await client.ban_chat_member(message.chat.id, reply_message.chat.id if reply_message.from_user is None else reply_message.from_user.id)
+            await client.ban_chat_member(message.chat.id, reply_message.chat.id if reply_message.from_user is None else reply_message.from_user.id, revoke_messages=True)
 
     @app.on_message(filters.private & filters.command("sender"))
     async def get_message_info(client: Client, message: Message):
@@ -343,12 +370,13 @@ def _update(app):
 
     @app.on_message(filters.private & filters.command("getlog"))
     async def get_log(client: Client, message: Message):
-        if len(message.command) != 2:
+        command = message.command
+        if not command or len(command) != 2:
             await message.reply("使用方法: /getlog [challenge_id]")
             return
         if not is_admin(message.from_user.id):
             return
-        logs = db.get_logs_by_challenge_id(message.command[1])
+        logs = db.get_logs_by_challenge_id(command[1])
         if len(logs) == 0:
             await message.reply("没有找到相关记录")
             return
@@ -357,6 +385,99 @@ def _update(app):
             text += str(log)
             text += "\n"
         await message.reply(text)
+
+    @app.on_message(filters.private & filters.command("getuserbyip"))
+    async def get_user_by_ip(client: Client, message: Message):
+        if message.from_user is None or not is_admin(message.from_user.id):
+            return
+
+        command = message.command
+        if not command or len(command) != 2:
+            await message.reply("使用方法: /getuserbyip [ip]\n例如: `/getuserbyip 123.56.67.8`")
+            return
+
+        ip_addr = command[1]
+        if not is_valid_ip_addr(ip_addr):
+            await message.reply("IP 地址格式错误")
+            return
+
+        logs = db.get_passed_users_by_ip(ip_addr)
+        if len(logs) == 0:
+            await message.reply("没有找到通过该 IP 验证的用户")
+            return
+
+        groups = {}
+        for group_id, user_id, last_passed_at in logs:
+            groups.setdefault(group_id, []).append((user_id, last_passed_at))
+        unique_user_count = len({user_id for _, user_id, _ in logs})
+
+        group_titles = {}
+        for group_id in groups:
+            try:
+                chat = await client.get_chat(group_id)
+                group_titles[group_id] = chat.title or str(group_id)
+            except RPCError:
+                group_titles[group_id] = "无法获取群名"
+
+        text = f"IP `{ip_addr}` 通过验证的用户共 {unique_user_count} 个，用户/群记录 {len(logs)} 条，涉及 {len(groups)} 个群:\n\n"
+        for group_id, users in groups.items():
+            text += f"群组: {group_titles[group_id]} (`{group_id}`)\n"
+            for user_id, last_passed_at in users:
+                text += f"- [用户](tg://user?id={user_id}) `{user_id}` 最近通过: `{last_passed_at}`\n"
+            text += "\n"
+
+        for chunk in split_long_message(text):
+            await message.reply(chunk, disable_web_page_preview=True)
+
+    @app.on_message(filters.private & filters.command("banuserbyip"))
+    async def ban_user_by_ip(client: Client, message: Message):
+        if message.from_user is None or not is_admin(message.from_user.id):
+            return
+
+        command = message.command
+        if not command or len(command) != 3:
+            await message.reply("使用方法: /banuserbyip [ip] [group_id]\n例如: `/banuserbyip 123.56.67.8 -1234567889`")
+            return
+
+        ip_addr = command[1]
+        if not is_valid_ip_addr(ip_addr):
+            await message.reply("IP 地址格式错误")
+            return
+
+        try:
+            group_id = int(command[2])
+        except ValueError:
+            await message.reply("群组 ID 格式错误")
+            return
+
+        user_ids = db.get_passed_user_ids_by_ip_and_group(ip_addr, group_id)
+        if len(user_ids) == 0:
+            await message.reply("没有找到在该群通过这个 IP 验证的用户")
+            return
+
+        await message.reply(f"开始封禁 `{group_id}` 中通过 IP `{ip_addr}` 验证的 {len(user_ids)} 个用户...")
+
+        success_count = 0
+        failed_users = []
+        for user_id in user_ids:
+            try:
+                await client.ban_chat_member(group_id, user_id, revoke_messages=True)
+                success_count += 1
+            except ChatAdminRequired:
+                await message.reply("封禁失败: Bot 在该群没有封禁用户权限")
+                return
+            except RPCError as e:
+                logging.error(f"Failed to ban user {user_id} in group {group_id}: {e}")
+                failed_users.append((user_id, str(e)))
+
+        text = f"封禁完成: 成功 {success_count} 个，失败 {len(failed_users)} 个。"
+        if failed_users:
+            text += "\n\n失败列表:\n"
+            for user_id, error in failed_users:
+                text += f"- `{user_id}`: `{error}`\n"
+
+        for chunk in split_long_message(text):
+            await message.reply(chunk)
 
     @app.on_message(filters.private & filters.forwarded)
     async def get_user_record(client: Client, message: Message):
@@ -409,7 +530,7 @@ def _update(app):
             return
 
     @app.on_chat_join_request()
-    async def on_chat_join_request(client: Client, message: Message):
+    async def on_chat_join_request(client: Client, message: ChatJoinRequest):
         user_id = message.from_user.id
         chat_id = message.chat.id
         group_config = get_group_config(message.chat.id)
@@ -486,7 +607,7 @@ def _update(app):
                     )
                     _current_challenges[challenge_id] = (challenge, message.from_user.id, timeout_event)
 
-                    await client.ban_chat_member(chat_id, target.id, until_date=current_time + timedelta(seconds=31))
+                    await client.ban_chat_member(chat_id, target.id, until_date=current_time + timedelta(seconds=31), revoke_messages=True)
                     db.update_last_try(current_time, target.id)
                     db.try_count_plus_one(target.id)
                     try_count = int(db.get_try_count(target.id))
@@ -695,7 +816,6 @@ def _update(app):
                         target_id,
                         permissions=ChatPermissions(
                             can_send_messages=True,
-                            can_send_media_messages=True,
                             can_send_other_messages=True,
                             can_send_polls=True,
                             can_add_web_page_previews=True,
@@ -727,7 +847,7 @@ def _update(app):
                     logging.error(str(e))
             else:
                 try:
-                    await client.ban_chat_member(chat_id, target_id)
+                    await client.ban_chat_member(chat_id, target_id, revoke_messages=True)
                 except ChatAdminRequired:
                     await client.answer_callback_query(
                         query_id, group_config["msg_bot_no_permission"])
@@ -798,7 +918,6 @@ def _update(app):
                 target_id,
                 permissions=ChatPermissions(
                     can_send_messages=True,
-                    can_send_media_messages=True,
                     can_send_other_messages=True,
                     can_send_polls=True,
                     can_add_web_page_previews=True,
@@ -855,10 +974,10 @@ def _update(app):
                 return
 
             if group_config["challenge_failed_action"] == FailedAction.ban:
-                await client.ban_chat_member(chat_id, user_id)
+                await client.ban_chat_member(chat_id, user_id, revoke_messages=True)
             else:
                 # kick
-                await client.ban_chat_member(chat_id, user_id, until_date=datetime.now() + timedelta(seconds=31))
+                await client.ban_chat_member(chat_id, user_id, until_date=datetime.now() + timedelta(seconds=31), revoke_messages=True)
                 logging.info(f"{user_id} unbanned")
 
             if group_config["delete_failed_challenge"]:
@@ -938,9 +1057,9 @@ def _update(app):
                                   ))
 
         if group_config["challenge_timeout_action"] == FailedAction.ban:
-            await client.ban_chat_member(chat_id, from_id)
+            await client.ban_chat_member(chat_id, from_id, revoke_messages=True)
         elif group_config["challenge_timeout_action"] == FailedAction.kick:
-            await client.ban_chat_member(chat_id, from_id, until_date=datetime.now() + timedelta(seconds=31))
+            await client.ban_chat_member(chat_id, from_id, until_date=datetime.now() + timedelta(seconds=31), revoke_messages=True)
             logging.info(f"{from_id} unbanned")
         else:
             pass

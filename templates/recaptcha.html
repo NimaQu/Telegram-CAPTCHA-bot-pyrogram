@@ -2,48 +2,53 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex,nofollow">
     <title>完成验证</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?compat=recaptcha" async defer></script>
-    <style>
-        .recaptcha {
-            margin-top: 50px;
-            display: flex;
-            justify-content: center;
-        }
-
-        .submit-button {
-            margin-top: 10px;
-            display: flex;
-            justify-content: center;
-        }
-
-        .result {
-            margin: auto;
-            display: flex;
-            justify-content: center;
-        }
-    </style>
 </head>
-<meta name="viewport"
-      content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
 <body>
-<div class="recaptcha">
-    <form action="" method="POST">
-        <div class="g-recaptcha" data-sitekey="{{ sitekey }}"></div>
-        <br/>
-        <div class="submit-button">
-            <input type="submit" value="提交验证/Submit Verification">
+<main class="shell">
+    <header class="topbar">
+        <div class="brand">
+            <span class="mark" aria-hidden="true"></span>
+            <div class="brand-text">
+                <span class="brand-title">Telegram CAPTCHA Bot</span>
+                <span class="brand-subtitle">Secure verification</span>
+            </div>
         </div>
-    </form>
-</div>
-{% with messages = get_flashed_messages(category_filter='error') %}
-    {% if messages %}
-        <ul class=flashes>
-            {% for message in messages %}
-                <div class="result"><h2>{{ message }}</h2></div>
-            {% endfor %}
-        </ul>
-    {% endif %}
-{% endwith %}
+        <span class="status-pill">Challenge active</span>
+    </header>
+
+    <section class="verify-wrap">
+        <div class="panel verify-panel">
+            <div class="section-title">
+                <div class="eyebrow">Human check</div>
+                <h1>完成验证</h1>
+                <p>请完成下方验证并提交。通过后会自动回到群组验证流程。</p>
+            </div>
+
+            {% with messages = get_flashed_messages(category_filter='error') %}
+                {% if messages %}
+                    <ul class="message-list" aria-live="polite">
+                        {% for message in messages %}
+                            <li class="notice error">{{ message }}</li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+            {% endwith %}
+
+            <div class="captcha-frame">
+                <form class="captcha-form" action="" method="POST" autocomplete="off">
+                    <div class="g-recaptcha" data-sitekey="{{ sitekey }}"></div>
+                    <button class="submit-button" type="submit">提交验证</button>
+                </form>
+            </div>
+
+            <p class="quiet">如果组件无法加载，请关闭代理、刷新页面，或返回 Telegram 重新打开验证链接。</p>
+        </div>
+    </section>
+</main>
 </body>
 </html>
