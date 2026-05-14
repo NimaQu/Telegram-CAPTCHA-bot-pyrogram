@@ -1057,7 +1057,7 @@ def _update(app):
                                   ))
 
         if group_config["challenge_timeout_action"] == FailedAction.ban:
-            await client.ban_chat_member(chat_id, from_id, revoke_messages=True)
+            await client.ban_chat_member(chat_id, from_id)
         elif group_config["challenge_timeout_action"] == FailedAction.kick:
             await client.ban_chat_member(chat_id, from_id, until_date=datetime.now() + timedelta(seconds=31))
             logging.info(f"{from_id} unbanned")
