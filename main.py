@@ -258,7 +258,8 @@ def _update(app):
             for x in user_id_list:
                 try:
                     user = await client.get_users(x)
-                except BadRequest:
+                except (BadRequest, IndexError):
+                    logging.warning("Failed to get user info for %s", x)
                     deleted_users.append(x)
                     failed_count += 1
                     continue
@@ -710,7 +711,7 @@ def _update(app):
     async def private_math_challenge_callback(client: Client, callback_query: CallbackQuery):
         query_data = str(callback_query.data)
         query_id = callback_query.id
-        chat_id = query_data.split("|")[1]
+        chat_id = int(query_data.split("|")[1])
         answer = query_data.split("|")[0]
         user_id = callback_query.from_user.id
         msg_id = callback_query.message.id
