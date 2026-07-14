@@ -65,7 +65,7 @@ class TurnstileService:
             )
             response.raise_for_status()
             payload = response.json()
-        except httpx.HTTPError, ValueError, TypeError:
+        except (httpx.HTTPError, ValueError, TypeError):
             logger.exception("Turnstile verification request failed")
             return TurnstileResult(False, ("verification-unavailable",))
         errors = tuple(str(value) for value in payload.get("error-codes", []))
