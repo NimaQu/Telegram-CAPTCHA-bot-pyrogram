@@ -1,0 +1,65 @@
+[bot]
+username = "bot_username"
+token = "123456:replace-me"
+api_id = 123456
+api_hash = "replace-me"
+admin_ids = [123456789]
+log_channel_id = -1001234567890
+
+[database]
+url = "postgresql+psycopg://captcha:replace-me@127.0.0.1/captcha"
+pool_size = 5
+max_overflow = 10
+
+[web]
+host = "127.0.0.1"
+port = 5000
+debug = false
+trusted_proxy_cidrs = ["127.0.0.1/32", "::1/128"]
+
+[proxy]
+
+[turnstile]
+site_key = "replace-me"
+secret_key = "replace-me"
+base_url = "https://example.com"
+verify_url = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+timeout_seconds = 10.0
+
+[defaults]
+challenge_timeout = 60
+challenge_timeout_action = "kick"
+challenge_failed_action = "kick"
+challenge_type = "math"
+delete_passed_challenge = true
+delete_passed_challenge_interval = 15
+delete_failed_challenge = true
+delete_failed_challenge_interval = 15
+enable_global_blacklist = true
+global_timeout_user_blacklist_remove = 600
+
+[messages]
+start_message = "喵？"
+passed_answer = "#PASS\n用户: {targetuserid}\n群组 ID: {groupid}\n群组标题: {grouptitle}"
+passed_admin = "#PASS_MANUALLY\n用户: {targetuserid}\n群组 ID: {groupid}\n群组标题: {grouptitle}"
+failed_answer = "#FAIL_WRONG_ANSWER\n用户: {targetuserid}\n群组 ID: {groupid}\n群组标题: {grouptitle}"
+failed_timeout = "#FAIL_TLO\n用户: {targetuserid}\n用户名: {targetusername}\nFirstname: {targetfirstname}\nLastname: {targetlastname}\n群组 ID: {groupid}\n群组标题: {grouptitle}"
+failed_admin = "#FAIL_MANUALLY\n用户: {targetuserid}\n群组 ID: {groupid}\n群组标题: {grouptitle}"
+failed_auto_kick = "#AUTO_KICKED\n用户: {targetuserid}\n用户名: {targetusername}\nFirstname: {targetfirstname}\nLastname: {targetlastname}\n群组 ID: {groupid}\n群组标题: {grouptitle}\n上次尝试: {lastattempt}\n间隔: {sincelastattempt}\n次数: {trycount}"
+message_deleted = "#MESSAGE_DELETED\n用户: {targetuserid}\n消息: {messageid}\n群组 ID: {groupid}\n群组标题: {grouptitle}"
+into_group = "#ADDBOT\n群组 ID: {groupid}\n群组标题: {grouptitle}"
+leave_group = "Bot 离开了群组: {groupid}"
+leave_message = "根据 Term of Service，本 Bot 无法对该群组提供服务。"
+self_introduction = "Telegram CAPTCHA Bot\nPowered by Kurigram"
+challenge_not_for_you = "这次验证并不针对您"
+challenge_math = "用户 {target_id}，请在 {timeout} 秒内回答：\n{challenge}"
+challenge_math_private = "请在 {timeout} 秒内回答：\n{challenge}"
+challenge_recaptcha = "用户 {target_id}，请在 {timeout} 秒内完成验证："
+challenge_passed = "您已通过验证，欢迎加入本群！"
+challenge_failed = "抱歉，您没有通过验证，如需解封请私聊本群群管。"
+approve_manually = "人工通过 PASS"
+refuse_manually = "人工拒绝 DENY"
+permission_denied = "您的权限不足"
+bot_no_permission = "操作失败，可能是群管并未赋予机器人管理员权限。"
+approved = "您已被管理员 {user} 人工通过，欢迎加入本群！"
+refused = "该用户已被管理员 {user} 移除出群。"

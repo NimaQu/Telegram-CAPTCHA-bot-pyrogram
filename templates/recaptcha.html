@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow">
     <title>完成验证</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='site.css') }}">
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?compat=recaptcha" async defer></script>
 </head>
 <body>
@@ -29,15 +29,11 @@
                 <p>请完成下方验证并提交。通过后会自动回到群组验证流程。</p>
             </div>
 
-            {% with messages = get_flashed_messages(category_filter='error') %}
-                {% if messages %}
-                    <ul class="message-list" aria-live="polite">
-                        {% for message in messages %}
-                            <li class="notice error">{{ message }}</li>
-                        {% endfor %}
-                    </ul>
-                {% endif %}
-            {% endwith %}
+            {% if error %}
+                <ul class="message-list" aria-live="polite">
+                    <li class="notice error">{{ error }}</li>
+                </ul>
+            {% endif %}
 
             <div class="captcha-frame">
                 <form class="captcha-form" action="" method="POST" autocomplete="off">

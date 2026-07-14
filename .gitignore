@@ -1,6 +1,7 @@
 # config files
 config.json
 config.ini
+config.toml
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -19,3 +20,10 @@ data.sqlite
 
 #venv
 venv
+.venv
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
