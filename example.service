@@ -1,0 +1,19 @@
+[Unit]
+Description=Telegram CAPTCHA Bot
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/telegram-captcha-bot
+ExecStart=/opt/telegram-captcha-bot/.venv/bin/captcha-bot run --config /opt/telegram-captcha-bot/config.toml
+Restart=on-failure
+RestartSec=5s
+PrivateTmp=true
+NoNewPrivileges=true
+KillSignal=SIGINT
+TimeoutStopSec=30s
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

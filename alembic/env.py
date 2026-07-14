@@ -1,13 +1,20 @@
+import os
 from logging.config import fileConfig
-from model import Base
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+
+from sqlalchemy import engine_from_config, pool
 
 from alembic import context
+from captcha_bot.config import load_settings
+from captcha_bot.db.models import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+settings = load_settings(os.environ.get("CAPTCHA_BOT_CONFIG", "config.toml"))
+database_url = settings.database.url.get_secret_value()
+if database_url.startswith("postgresql://"):
+    database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -64,9 +71,7 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection, target_metadata=target_metadata
-        )
+        context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():
             context.run_migrations()

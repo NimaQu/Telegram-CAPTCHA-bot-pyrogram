@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow">
     <title>验证结果</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='site.css') }}">
 </head>
 <body>
 <main class="shell">
@@ -28,17 +28,13 @@
                 <h1>验证结果</h1>
             </div>
 
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    <ul class="message-list" aria-live="polite">
-                        {% for category, message in messages %}
-                            <li class="notice {{ category }}">{{ message }}</li>
-                        {% endfor %}
-                    </ul>
-                {% else %}
-                    <p class="notice">当前没有可显示的验证结果。</p>
-                {% endif %}
-            {% endwith %}
+            {% if notice %}
+                <ul class="message-list" aria-live="polite">
+                    <li class="notice {{ category }}">{{ notice }}</li>
+                </ul>
+            {% else %}
+                <p class="notice">当前没有可显示的验证结果。</p>
+            {% endif %}
 
             <p class="quiet">这个页面不会保存验证状态。需要重新验证时，请回到 Telegram 使用新的验证链接。</p>
         </div>
