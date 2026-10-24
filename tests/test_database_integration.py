@@ -13,11 +13,24 @@ from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 
 from alembic import command
-from captcha_bot.config import load_settings
+from captcha_bot.config import Settings, load_settings
 from captcha_bot.db.models import RecaptchaLogAction
 from captcha_bot.db.repository import Database, Repository
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.mark.asyncio
+async def test_uninitialized_database_has_actionable_error(tmp_path: Path, settings: Settings) -> None:
+    database_settings = settings.database.model_copy(
+        update={"url": f"sqlite+aiosqlite:///{(tmp_path / 'empty.sqlite').as_posix()}"}
+    )
+    database = Database(settings.model_copy(update={"database": database_settings}))
+    try:
+        with pytest.raises(RuntimeError, match=r"captcha-bot init-db --config config\.toml"):
+            await database.ensure_schema_current()
+    finally:
+        await database.close()
 
 
 @pytest.fixture(scope="module")

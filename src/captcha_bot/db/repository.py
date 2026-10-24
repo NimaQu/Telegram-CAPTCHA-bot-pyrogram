@@ -8,7 +8,7 @@ from typing import Any, ClassVar
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import delete, event, func, select, text, update
+from sqlalchemy import delete, event, func, inspect, select, text, update
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
@@ -92,13 +92,19 @@ class Database:
     async def ensure_schema_current(self, alembic_ini: str | Path = "alembic.ini") -> None:
         config = Config(str(alembic_ini))
         expected = ScriptDirectory.from_config(config).get_current_head()
+        initialize_hint = "uv run captcha-bot init-db --config config.toml (use your actual config path)"
         try:
             async with self.engine.connect() as connection:
+                has_version = await connection.run_sync(lambda sync: inspect(sync).has_table("alembic_version"))
+                if not has_version:
+                    raise RuntimeError(f"database schema is not initialized; run {initialize_hint}")
                 current = await connection.scalar(text("SELECT version_num FROM alembic_version"))
         except SQLAlchemyError as exc:
-            raise RuntimeError("database schema is not initialized; run alembic upgrade head") from exc
+            raise RuntimeError(
+                "cannot read database schema; check the database path, permissions and file integrity"
+            ) from exc
         if current != expected:
-            raise RuntimeError(f"database schema is {current!r}, expected {expected!r}; run alembic upgrade head")
+            raise RuntimeError(f"database schema is {current!r}, expected {expected!r}; run {initialize_hint}")
 
     async def close(self) -> None:
         await self.engine.dispose()

@@ -10,7 +10,9 @@ from captcha_bot.db.models import Base
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
-settings = load_settings(os.environ.get("CAPTCHA_BOT_CONFIG", "config.toml"))
+settings = config.attributes.get("captcha_bot_settings")
+if settings is None:
+    settings = load_settings(os.environ.get("CAPTCHA_BOT_CONFIG", "config.toml"))
 database_url = settings.database.url
 if database_url.startswith("sqlite+aiosqlite:///"):
     database_url = database_url.replace("sqlite+aiosqlite:///", "sqlite:///", 1)

@@ -51,10 +51,12 @@ uv run captcha-bot migrate-config \
 首次部署或每次更新代码后，必须先显式升级数据库；应用不会自动修改生产库：
 
 ```bash
-CAPTCHA_BOT_CONFIG=config.toml uv run alembic upgrade head
+uv run captcha-bot init-db --config config.toml
 CAPTCHA_BOT_CONFIG=config.toml uv run alembic current
 uv run captcha-bot run --config config.toml
 ```
+
+`init-db` 会创建 SQLite 文件及表结构，已有数据库则按 Alembic 迁移升级至最新版本；重复执行不会清空数据，也不会连接 Telegram。普通启动不会自动建表。如果出现 `database schema is not initialized` 或 `no such table: alembic_version`，请先执行此命令。更新已有数据库前请先停止服务并备份文件。直接使用 `uv run alembic upgrade head` 仍然有效。
 
 兼容入口仍然可用：
 
