@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import sys
 import tomllib
+from collections.abc import Coroutine
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import httpx
 import pytest
@@ -41,6 +45,36 @@ def test_cli_run_calls_uvicorn(monkeypatch) -> None:
     cli.main()
     assert called["host"] == "127.0.0.1"
     assert called["port"] == 5000
+
+
+def test_cli_run_handles_keyboard_interrupt_after_cleanup(monkeypatch, caplog) -> None:
+    cleaned_up = False
+
+    async def fake_serve() -> None:
+        nonlocal cleaned_up
+        try:
+            raise KeyboardInterrupt
+        finally:
+            cleaned_up = True
+
+    monkeypatch.setattr(cli.uvicorn, "Server", lambda _config: SimpleNamespace(serve=fake_serve))
+    monkeypatch.setattr(cli, "_run_async", lambda coroutine: asyncio.run(coroutine))
+    monkeypatch.setattr(sys, "argv", ["captcha-bot", "run", "--config", "config.example.toml"])
+    with caplog.at_level(logging.INFO, logger="captcha_bot.cli"):
+        cli.main()
+    assert cleaned_up
+    assert "server stopped by interrupt" in caplog.text
+
+
+@pytest.mark.parametrize("error", [RuntimeError("server failed"), asyncio.CancelledError()])
+def test_server_does_not_hide_real_failures_or_unexpected_cancellation(monkeypatch, error: BaseException) -> None:
+    def fail(coroutine: Coroutine[Any, Any, Any]) -> None:
+        coroutine.close()
+        raise error
+
+    monkeypatch.setattr(cli, "_run_async", fail)
+    with pytest.raises(type(error)):
+        cli._serve_application(object(), "127.0.0.1", 5000, False)
 
 
 def test_cli_init_db_creates_schema_and_preserves_data(tmp_path: Path, monkeypatch, capsys) -> None:

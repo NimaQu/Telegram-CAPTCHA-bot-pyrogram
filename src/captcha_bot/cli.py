@@ -18,6 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from alembic import command
 from captcha_bot.config import load_settings, migrate_legacy_config
 from captcha_bot.db.importer import import_csv
+from captcha_bot.db.legacy import migrate_database
 from captcha_bot.db.repository import Database, Repository
 
 
@@ -30,6 +31,10 @@ def parser() -> argparse.ArgumentParser:
 
     initialize = subcommands.add_parser("init-db", help="initialize or upgrade the database without starting the bot")
     initialize.add_argument("--config", default="config.toml", type=Path)
+
+    transfer = subcommands.add_parser("migrate-db", help="copy the master database from config.ini into SQLite")
+    transfer.add_argument("--ini", default="config.ini", type=Path)
+    transfer.add_argument("--config", default="config.toml", type=Path)
 
     migrate = subcommands.add_parser("migrate-config", help="convert config.ini and config.json to TOML")
     migrate.add_argument("--ini", default="config.ini", type=Path)
@@ -73,7 +78,11 @@ def _serve_application(application: Any, host: str, port: int, debug: bool) -> N
         log_level="debug" if debug else "info",
         proxy_headers=False,
     )
-    _run_async(uvicorn.Server(config).serve())
+    try:
+        _run_async(uvicorn.Server(config).serve())
+    except KeyboardInterrupt:
+        # Uvicorn handles shutdown before asyncio.run re-raises SIGINT here.
+        logging.getLogger(__name__).info("server stopped by interrupt")
 
 
 def main(default_command: str | None = None) -> None:
@@ -82,6 +91,15 @@ def main(default_command: str | None = None) -> None:
         arguments = [default_command]
     args = parser().parse_args(arguments)
     try:
+        if args.command == "migrate-db":
+            counts = migrate_database(args.ini, args.config)
+            for table, count in counts.items():
+                print(
+                    f"{table}: 读取 {count.read}，新增 {count.inserted}，"
+                    f"重复/冲突跳过 {count.skipped}，策略转换 {count.normalized}"
+                )
+            print("迁移已提交；旧库未修改。third_party_blacklist 已忽略，日志内部 ID 已重新生成。")
+            return
         if args.command == "init-db":
             _initialize_database(args.config)
             print("数据库已初始化/升级至最新版本；可以启动机器人了。")

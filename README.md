@@ -88,6 +88,33 @@ Telegram 中的 `/reload` 会先完整校验 TOML。仅 `[defaults]` 与 `[messa
 
 首次设置由 SQLite upsert 原子写入并立即生效。
 
+## 从 master 旧数据库迁移
+
+迁移前停止新旧机器人，备份目标 SQLite 文件，保留原 `config.ini` 中的 `[db] conn_str`。
+命令只从 INI 读取旧库连接信息，目标始终是 `--config` 指定的 TOML 中的 SQLite。无需把旧数据库密码复制到 TOML。
+
+```bash
+uv run captcha-bot init-db --config config.toml
+uv run --extra migration captcha-bot migrate-db --ini config.ini --config config.toml
+uv run python main.py
+```
+
+`migration` 是仅用于读取旧 PostgreSQL 的可选依赖，使用 psycopg 3；日常运行仍然只需要 SQLite。
+支持旧 `postgresql://`、`postgresql+psycopg2://` 和 `postgresql+psycopg://` 连接串，密码中的百分号不会触发 INI 插值。
+
+迁移结构以 `master` 的 `model.py` 为基准，自动校验并复制三张表：
+
+- `blacklist_user`：保留用户、尝试次数、最近尝试及创建/更新时间，包括空时间戳。
+- `group_config`：保留群策略，丢弃 `third_party_blacklist`；非正 timeout 改为 300，不支持的验证类型改为 `math`，`mute` 等不支持的动作改为 `kick`，与新版升级规则一致。
+- `recaptcha_log`：保留完整业务字段、UA、IP 和时间戳；按新版事件键去重，内部自增 ID 重新生成，避免与目标日志 ID 碰撞。
+
+旧 PostgreSQL 使用只读、可重复读事务，分批读取；目标三张表在同一个事务中提交，任一步失败会整体回滚。
+重复执行时，黑名单/群配置的相同主键和日志的相同事件键会跳过，**不会覆盖目标已有记录**；每张表会报告读取、新增、跳过和策略转换数量，不会打印数据库密码。
+因此最好在启动新版之前迁移到空库，并检查迁移统计；不要一边迁移一边运行机器人。
+
+也支持采用上述 master 结构的 SQLite 源库，使用只读方式打开。更早期仅有 `user` 等表的 `data.sqlite` 不属于此结构，会明确拒绝；请走旧 CSV 导入。
+迁移源数据库不会执行 Alembic，也不会复制旧 `alembic_version` 覆盖新库版本。
+
 ## 旧 CSV 导入
 
 目标库必须已经升级到当前 Alembic head：
