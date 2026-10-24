@@ -49,10 +49,10 @@ class Sessions:
 
 
 def test_database_url_and_log_string() -> None:
-    assert async_database_url("postgresql://u:p@host/db") == "postgresql+psycopg://u:p@host/db"
-    assert async_database_url("postgresql+psycopg://u:p@host/db") == "postgresql+psycopg://u:p@host/db"
-    with pytest.raises(ValueError, match="PostgreSQL"):
-        async_database_url("sqlite:///db")
+    assert async_database_url("sqlite:///captcha.sqlite") == "sqlite+aiosqlite:///captcha.sqlite"
+    assert async_database_url("sqlite+aiosqlite:///captcha.sqlite") == "sqlite+aiosqlite:///captcha.sqlite"
+    with pytest.raises(ValueError, match="SQLite"):
+        async_database_url("postgresql://localhost/captcha")
     assert "127.0.0.1" in str(LogRecord(-1, 2, "id", "127.0.0.1", "ua", "Passed", datetime.now()))
 
 

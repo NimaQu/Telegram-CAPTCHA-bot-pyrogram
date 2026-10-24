@@ -5,7 +5,7 @@ import csv
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.sqlite import insert
 
 from captcha_bot.db.models import BlacklistUser, GroupConfig
 from captcha_bot.db.repository import Repository

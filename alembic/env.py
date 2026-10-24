@@ -11,9 +11,9 @@ from captcha_bot.db.models import Base
 # access to the values within the .ini file in use.
 config = context.config
 settings = load_settings(os.environ.get("CAPTCHA_BOT_CONFIG", "config.toml"))
-database_url = settings.database.url.get_secret_value()
-if database_url.startswith("postgresql://"):
-    database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+database_url = settings.database.url
+if database_url.startswith("sqlite+aiosqlite:///"):
+    database_url = database_url.replace("sqlite+aiosqlite:///", "sqlite:///", 1)
 config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 # Interpret the config file for Python logging.
@@ -51,6 +51,8 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        render_as_batch=True,
+        compare_type=True,
     )
 
     with context.begin_transaction():
@@ -71,7 +73,12 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            render_as_batch=True,
+            compare_type=True,
+        )
 
         with context.begin_transaction():
             context.run_migrations()

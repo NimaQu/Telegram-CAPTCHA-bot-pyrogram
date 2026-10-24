@@ -65,20 +65,18 @@ class BotSettings(StrictModel):
 
 
 class DatabaseSettings(StrictModel):
-    url: SecretStr
-    pool_size: int = Field(default=5, gt=0, le=50, strict=True)
-    max_overflow: int = Field(default=10, ge=0, le=100, strict=True)
+    url: str
+    busy_timeout_ms: int = Field(default=30_000, gt=0, le=300_000, strict=True)
 
     @field_validator("url")
     @classmethod
-    def validate_postgresql(cls, value: SecretStr) -> SecretStr:
-        url = value.get_secret_value()
+    def validate_sqlite(cls, value: str) -> str:
         try:
-            parsed = make_url(url)
+            parsed = make_url(value)
         except ArgumentError as exc:
-            raise ValueError("invalid PostgreSQL URL") from exc
-        if parsed.drivername not in {"postgresql", "postgresql+psycopg"} or not parsed.database:
-            raise ValueError("only PostgreSQL URLs are supported")
+            raise ValueError("invalid SQLite URL") from exc
+        if parsed.drivername != "sqlite+aiosqlite" or not parsed.database:
+            raise ValueError("database.url must use sqlite+aiosqlite")
         return value
 
 
@@ -249,7 +247,7 @@ def migrate_legacy_config(ini_path: str | Path, json_path: str | Path, output_pa
         raise FileExistsError(f"refusing to overwrite existing file: {output_file}")
     ini, legacy = _read_legacy(ini_file, json_file)
     defaults = legacy["*"]
-    ignored = ["msg_passed_mercy", "enable_third_party_blacklist", "flask_secret_key"]
+    ignored = ["msg_passed_mercy", "enable_third_party_blacklist", "flask_secret_key", "db.conn_str"]
 
     def legacy_action(name: str) -> str:
         action = str(defaults[name]).lower()
@@ -270,7 +268,7 @@ def migrate_legacy_config(ini_path: str | Path, json_path: str | Path, output_pa
             "admin_ids": list(admin_ids),
             "log_channel_id": ini.getint("bot", "channel"),
         },
-        "database": {"url": ini.get("db", "conn_str")},
+        "database": {"url": "sqlite+aiosqlite:///captcha.sqlite"},
         "web": {
             "host": ini.get("web", "flask_host", fallback="127.0.0.1"),
             "port": ini.getint("web", "flask_port", fallback=5000),

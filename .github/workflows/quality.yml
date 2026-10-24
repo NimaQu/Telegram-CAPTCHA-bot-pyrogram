@@ -7,23 +7,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:18
-        env:
-          POSTGRES_USER: captcha
-          POSTGRES_PASSWORD: replace-me
-          POSTGRES_DB: captcha
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U captcha -d captcha"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     env:
       CAPTCHA_BOT_CONFIG: config.example.toml
-      TEST_DATABASE_URL: postgresql+psycopg://captcha:replace-me@127.0.0.1:5432/captcha
 
     steps:
       - uses: actions/checkout@v6

@@ -15,8 +15,10 @@ __pycache__/
 #idea
 .idea/
 
-#db
-data.sqlite
+# SQLite databases and runtime journals
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
 #venv
 venv
@@ -24,6 +26,8 @@ venv
 
 # Tool caches
 .pytest_cache/
+.pytest-tmp*/
 .ruff_cache/
 .coverage
 htmlcov/
+.uv-cache/

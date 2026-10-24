@@ -8,8 +8,9 @@ from typing import Any, ClassVar
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import delete, func, select, text, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import delete, event, func, select, text, update
+from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from captcha_bot.config import ChallengeType, DefaultPolicy, FailedAction, Settings
@@ -47,23 +48,37 @@ class LogRecord:
 
 
 def async_database_url(url: str) -> str:
-    if url.startswith("postgresql+psycopg://"):
+    if url.startswith("sqlite+aiosqlite:///"):
         return url
-    if url.startswith("postgresql://"):
-        return url.replace("postgresql://", "postgresql+psycopg://", 1)
-    raise ValueError("only PostgreSQL is supported")
+    if url.startswith("sqlite:///"):
+        return url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+    raise ValueError("only SQLite is supported")
 
 
 class Database:
     def __init__(self, settings: Settings) -> None:
         database = settings.database
+        busy_timeout_ms = database.busy_timeout_ms
         self.engine: AsyncEngine = create_async_engine(
-            async_database_url(database.url.get_secret_value()),
+            async_database_url(database.url),
             pool_pre_ping=True,
-            pool_size=database.pool_size,
-            max_overflow=database.max_overflow,
+            pool_size=1,
+            max_overflow=0,
+            connect_args={"timeout": busy_timeout_ms / 1000},
             hide_parameters=True,
         )
+
+        @event.listens_for(self.engine.sync_engine, "connect")
+        def configure_sqlite_connection(dbapi_connection: Any, _: Any) -> None:
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+                cursor.execute("PRAGMA foreign_keys=ON")
+                cursor.execute(f"PRAGMA busy_timeout={busy_timeout_ms}")
+            finally:
+                cursor.close()
+
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
 
     async def healthcheck(self) -> bool:
@@ -77,8 +92,11 @@ class Database:
     async def ensure_schema_current(self, alembic_ini: str | Path = "alembic.ini") -> None:
         config = Config(str(alembic_ini))
         expected = ScriptDirectory.from_config(config).get_current_head()
-        async with self.engine.connect() as connection:
-            current = await connection.scalar(text("SELECT version_num FROM alembic_version"))
+        try:
+            async with self.engine.connect() as connection:
+                current = await connection.scalar(text("SELECT version_num FROM alembic_version"))
+        except SQLAlchemyError as exc:
+            raise RuntimeError("database schema is not initialized; run alembic upgrade head") from exc
         if current != expected:
             raise RuntimeError(f"database schema is {current!r}, expected {expected!r}; run alembic upgrade head")
 
@@ -210,7 +228,15 @@ class Repository:
             user_agent=user_agent,
             action=action.value,
         )
-        statement = statement.on_conflict_do_nothing(constraint="uq_recaptcha_log_event")
+        statement = statement.on_conflict_do_nothing(
+            index_elements=[
+                RecaptchaLog.challenge_id,
+                RecaptchaLog.user_id,
+                RecaptchaLog.group_id,
+                RecaptchaLog.ip_addr,
+                RecaptchaLog.action,
+            ]
+        )
         async with self.sessions.begin() as session:
             await session.execute(statement)
 

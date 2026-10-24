@@ -29,7 +29,6 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=True),
         sa.Column("updated_at", sa.DateTime(), nullable=True),
         sa.PrimaryKeyConstraint("user_id"),
-        sa.UniqueConstraint("user_id"),
     )
     op.create_table(
         "group_config",
@@ -41,7 +40,6 @@ def upgrade() -> None:
         sa.Column("third_party_blacklist", sa.Boolean(), nullable=False),
         sa.Column("global_blacklist", sa.Boolean(), nullable=False),
         sa.PrimaryKeyConstraint("chat_id"),
-        sa.UniqueConstraint("chat_id"),
     )
     op.create_table(
         "recaptcha_log",
@@ -54,12 +52,7 @@ def upgrade() -> None:
         sa.Column("action", sa.String(length=20), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=True),
         sa.Column("updated_at", sa.DateTime(), nullable=True),
-        sa.ForeignKeyConstraint(
-            ["group_id"],
-            ["group_config.chat_id"],
-        ),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("id"),
     )
     # ### end Alembic commands ###
 

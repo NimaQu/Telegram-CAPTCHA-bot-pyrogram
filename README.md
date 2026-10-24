@@ -1,6 +1,6 @@
 # Telegram CAPTCHA Bot
 
-基于 Kurigram、FastAPI 和 PostgreSQL 的异步 Telegram 入群验证机器人。支持普通入群与申请入群、数学题与 Cloudflare Turnstile、人工通过/拒绝、超时处理、全局黑名单及验证日志/IP 管理。
+基于 Kurigram、FastAPI 和 SQLite 的异步 Telegram 入群验证机器人。支持普通入群与申请入群、数学题与 Cloudflare Turnstile、人工通过/拒绝、超时处理、全局黑名单及验证日志/IP 管理。
 
 本版本固定使用 **Python 3.14**，依赖只由 `pyproject.toml` 与 `uv.lock` 管理。配置只读取 TOML；旧 INI/JSON 配置需要先通过迁移命令转换。
 
@@ -10,7 +10,6 @@
 
 - Python 3.14
 - [uv](https://docs.astral.sh/uv/)
-- PostgreSQL
 - Telegram Bot Token、API ID 与 API Hash
 - Cloudflare Turnstile site key 与 secret key
 
@@ -22,14 +21,19 @@ cp config.example.toml config.toml
 chmod 600 config.toml
 ```
 
-编辑 `config.toml` 中的 `[bot]`、`[database]`、`[web]`、`[proxy]`、`[turnstile]`、`[defaults]` 和 `[messages]`。数据库 URL 必须使用 PostgreSQL，例如：
+编辑 `config.toml` 中的 `[bot]`、`[database]`、`[web]`、`[proxy]`、`[turnstile]`、`[defaults]` 和 `[messages]`。数据库使用本地 SQLite 文件：
 
 ```toml
 [database]
-url = "postgresql+psycopg://captcha:password@127.0.0.1/captcha"
+url = "sqlite+aiosqlite:///captcha.sqlite"
+busy_timeout_ms = 30000
 ```
 
-配置会在启动前严格校验：ID 和端口类型、正数范围、动作/验证类型枚举、HTTP URL、可信代理 CIDR 及消息占位符均不合法时拒绝启动。Token、API Hash、数据库 URL 和 Turnstile secret 在模型日志中会被隐藏。
+配置会在启动前严格校验：ID 和端口类型、正数范围、动作/验证类型枚举、HTTP URL、可信代理 CIDR 及消息占位符均不合法时拒绝启动。Token、API Hash 和 Turnstile secret 在模型日志中会被隐藏。
+
+SQLite 以 WAL 模式运行，并配置 busy timeout、外键检查和原子 upsert。它适合单个 Bot 进程；不要让多个实例同时连接同一个数据库文件，也不要把数据库放在 NFS/SMB 等网络文件系统上。备份时应先停止服务，再复制 `captcha.sqlite`。
+
+仓库里历史遗留的 `data.sqlite` 是旧表结构，新版不会覆盖或就地升级它。需要保留旧数据时，先将群配置和黑名单导出为 CSV，再用下文的 `import-csv` 命令导入新建的 `captcha.sqlite`。
 
 ## 从旧配置迁移
 
@@ -80,7 +84,7 @@ Telegram 中的 `/reload` 会先完整校验 TOML。仅 `[defaults]` 与 `[messa
 /faset enable_global_blacklist true
 ```
 
-首次设置由 PostgreSQL upsert 原子写入并立即生效。
+首次设置由 SQLite upsert 原子写入并立即生效。
 
 ## 旧 CSV 导入
 
@@ -115,13 +119,7 @@ uv run pytest
 uv run pip-audit
 ```
 
-PostgreSQL 集成测试只对显式指定的一次性测试库运行，测试过程会清空并重建该数据库：
-
-```bash
-TEST_DATABASE_URL=postgresql+psycopg://captcha:password@127.0.0.1/captcha_test uv run pytest -m integration
-```
-
-不要把生产数据库 URL 传给 `TEST_DATABASE_URL`。GitHub Actions 使用 Python 3.14 与独立 PostgreSQL service 执行格式、静态检查、类型检查、测试、覆盖率、Alembic check 和依赖审计。
+数据库集成测试会在 pytest 临时目录中创建并删除独立 SQLite 文件，不接触运行中的数据库。GitHub Actions 使用 Python 3.14 执行格式、静态检查、类型检查、测试、覆盖率、Alembic check 和依赖审计，不再需要数据库 service 或 Docker。
 
 ## 项目结构
 

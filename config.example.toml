@@ -7,9 +7,8 @@ admin_ids = [123456789]
 log_channel_id = -1001234567890
 
 [database]
-url = "postgresql+psycopg://captcha:replace-me@127.0.0.1/captcha"
-pool_size = 5
-max_overflow = 10
+url = "sqlite+aiosqlite:///captcha.sqlite"
+busy_timeout_ms = 30000
 
 [web]
 host = "127.0.0.1"

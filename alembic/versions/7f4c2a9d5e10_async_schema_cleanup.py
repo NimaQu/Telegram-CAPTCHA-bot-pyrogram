@@ -18,26 +18,25 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.drop_constraint("blacklist_user_user_id_key", "blacklist_user", type_="unique", if_exists=True)
-    op.drop_constraint("group_config_chat_id_key", "group_config", type_="unique", if_exists=True)
-    op.drop_constraint("recaptcha_log_id_key", "recaptcha_log", type_="unique", if_exists=True)
-    op.drop_column("group_config", "third_party_blacklist")
+    if op.get_bind().dialect.name != "sqlite":
+        op.drop_constraint("blacklist_user_user_id_key", "blacklist_user", type_="unique", if_exists=True)
+        op.drop_constraint("group_config_chat_id_key", "group_config", type_="unique", if_exists=True)
+        op.drop_constraint("recaptcha_log_id_key", "recaptcha_log", type_="unique", if_exists=True)
 
     op.execute("UPDATE group_config SET timeout = 300 WHERE timeout <= 0")
     op.execute("UPDATE group_config SET challenge_type = 'math' WHERE challenge_type NOT IN ('math', 'recaptcha')")
     op.execute("UPDATE group_config SET failed_action = 'kick' WHERE failed_action NOT IN ('ban', 'kick')")
     op.execute("UPDATE group_config SET timeout_action = 'kick' WHERE timeout_action NOT IN ('ban', 'kick')")
-    op.create_check_constraint("ck_group_config_timeout_positive", "group_config", "timeout > 0")
-    op.create_check_constraint(
-        "ck_group_config_challenge_type", "group_config", "challenge_type IN ('math', 'recaptcha')"
-    )
-    op.create_check_constraint("ck_group_config_failed_action", "group_config", "failed_action IN ('ban', 'kick')")
-    op.create_check_constraint("ck_group_config_timeout_action", "group_config", "timeout_action IN ('ban', 'kick')")
-    op.create_unique_constraint(
-        "uq_recaptcha_log_event",
-        "recaptcha_log",
-        ["challenge_id", "user_id", "group_id", "ip_addr", "action"],
-    )
+    with op.batch_alter_table("group_config") as batch_op:
+        batch_op.drop_column("third_party_blacklist")
+        batch_op.create_check_constraint("ck_group_config_timeout_positive", "timeout > 0")
+        batch_op.create_check_constraint("ck_group_config_challenge_type", "challenge_type IN ('math', 'recaptcha')")
+        batch_op.create_check_constraint("ck_group_config_failed_action", "failed_action IN ('ban', 'kick')")
+        batch_op.create_check_constraint("ck_group_config_timeout_action", "timeout_action IN ('ban', 'kick')")
+    with op.batch_alter_table("recaptcha_log") as batch_op:
+        batch_op.create_unique_constraint(
+            "uq_recaptcha_log_event", ["challenge_id", "user_id", "group_id", "ip_addr", "action"]
+        )
     op.create_index("ix_recaptcha_log_challenge_created", "recaptcha_log", ["challenge_id", "created_at"])
     op.create_index("ix_recaptcha_log_user_created", "recaptcha_log", ["user_id", "created_at"])
     op.create_index(
@@ -51,14 +50,15 @@ def downgrade() -> None:
     op.drop_index("ix_recaptcha_log_ip_action_group_user_created", table_name="recaptcha_log")
     op.drop_index("ix_recaptcha_log_user_created", table_name="recaptcha_log")
     op.drop_index("ix_recaptcha_log_challenge_created", table_name="recaptcha_log")
-    op.drop_constraint("uq_recaptcha_log_event", "recaptcha_log", type_="unique")
-    op.drop_constraint("ck_group_config_timeout_action", "group_config", type_="check")
-    op.drop_constraint("ck_group_config_failed_action", "group_config", type_="check")
-    op.drop_constraint("ck_group_config_challenge_type", "group_config", type_="check")
-    op.drop_constraint("ck_group_config_timeout_positive", "group_config", type_="check")
-    op.add_column(
-        "group_config", sa.Column("third_party_blacklist", sa.Boolean(), nullable=False, server_default=sa.false())
-    )
-    op.create_unique_constraint("recaptcha_log_id_key", "recaptcha_log", ["id"])
-    op.create_unique_constraint("group_config_chat_id_key", "group_config", ["chat_id"])
-    op.create_unique_constraint("blacklist_user_user_id_key", "blacklist_user", ["user_id"])
+    with op.batch_alter_table("recaptcha_log") as batch_op:
+        batch_op.drop_constraint("uq_recaptcha_log_event", type_="unique")
+    with op.batch_alter_table("group_config") as batch_op:
+        batch_op.drop_constraint("ck_group_config_timeout_action", type_="check")
+        batch_op.drop_constraint("ck_group_config_failed_action", type_="check")
+        batch_op.drop_constraint("ck_group_config_challenge_type", type_="check")
+        batch_op.drop_constraint("ck_group_config_timeout_positive", type_="check")
+        batch_op.add_column(sa.Column("third_party_blacklist", sa.Boolean(), nullable=False, server_default=sa.false()))
+    if op.get_bind().dialect.name != "sqlite":
+        op.create_unique_constraint("recaptcha_log_id_key", "recaptcha_log", ["id"])
+        op.create_unique_constraint("group_config_chat_id_key", "group_config", ["chat_id"])
+        op.create_unique_constraint("blacklist_user_user_id_key", "blacklist_user", ["user_id"])

@@ -13,14 +13,14 @@ from captcha_bot.config import ConfigStore, Settings, load_settings, migrate_leg
 
 def test_example_config_is_valid(settings: Settings) -> None:
     assert settings.bot.api_id == 123456
-    assert settings.database.url.get_secret_value().startswith("postgresql+psycopg://")
+    assert settings.database.url == "sqlite+aiosqlite:///captcha.sqlite"
     assert "123456:replace-me" not in repr(settings)
 
 
-def test_rejects_non_postgresql_and_unknown_placeholders(settings: Settings) -> None:
+def test_rejects_non_sqlite_and_unknown_placeholders(settings: Settings) -> None:
     raw = settings.model_dump(mode="python")
-    raw["database"]["url"] = "sqlite:///data.sqlite"
-    with pytest.raises(ValidationError, match="PostgreSQL"):
+    raw["database"]["url"] = "postgresql://localhost/captcha"
+    with pytest.raises(ValidationError, match=r"sqlite\+aiosqlite"):
         Settings.model_validate(raw)
     raw = settings.model_dump(mode="python")
     raw["messages"]["start_message"] = "bad {unknown}"
@@ -119,7 +119,8 @@ def test_migrates_legacy_config_without_overwrite(tmp_path: Path) -> None:
     migrated = load_settings(output)
     assert migrated.bot.admin_ids == (1, 2)
     assert migrated.defaults.challenge_failed_action == "ban"
-    assert ignored == ["msg_passed_mercy", "enable_third_party_blacklist", "flask_secret_key"]
+    assert migrated.database.url == "sqlite+aiosqlite:///captcha.sqlite"
+    assert ignored == ["msg_passed_mercy", "enable_third_party_blacklist", "flask_secret_key", "db.conn_str"]
     with pytest.raises(FileExistsError):
         migrate_legacy_config(ini, json_path, output)
 
