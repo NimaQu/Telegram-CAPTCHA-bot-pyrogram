@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from pyrogram import Client
 from pyrogram.enums import ChatMemberStatus, ChatType
-from pyrogram.types import ChatJoinRequest
+from pyrogram.types import ChatJoinRequest, User
 
 from captcha_bot.challenges import ChallengeKind, ChallengeRegistry, ChallengeSession
 from captcha_bot.config import ChallengeType, Settings
@@ -219,7 +219,10 @@ async def test_start_and_join_request_challenges(settings: Settings) -> None:
     assert "点击下方按钮" in start.reply.await_args.args[0]
     await context.registry.shutdown()
 
-    request = SimpleNamespace(from_user=SimpleNamespace(id=42), chat=SimpleNamespace(id=-1001, title="group"))
+    request = SimpleNamespace(
+        from_user=User(id=42, first_name="First", last_name="Last", username="user"),
+        chat=SimpleNamespace(id=-1001, title="group"),
+    )
     await challenge.on_chat_join_request(context, context.client, cast(ChatJoinRequest, request))
     created = await context.registry.find(42, -1001)
     assert created is not None and created.kind == ChallengeKind.MATH and created.message_id == 100
@@ -291,6 +294,75 @@ async def test_member_join_blacklist_windows(settings: Settings) -> None:
     context.repository.remove_blacklist_users.assert_awaited_once_with(42)
     assert await context.registry.find(42, -1001) is not None
     await context.registry.shutdown()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("challenge_type", [ChallengeType.MATH, ChallengeType.RECAPTCHA])
+@pytest.mark.parametrize("join_request", [False, True])
+async def test_timeout_audit_uses_profile_saved_at_join(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, challenge_type: ChallengeType, join_request: bool
+) -> None:
+    monkeypatch.setattr(challenge, "schedule", close_schedule)
+    policy = settings.defaults.model_copy(update={"challenge_type": challenge_type})
+    context = context_for(settings, policy=policy)
+    if join_request:
+        user = User(id=42, first_name="Original First", last_name="Original Last", username="original_user")
+        request = SimpleNamespace(from_user=user, chat=SimpleNamespace(id=-1001, title="group"))
+        await challenge.on_chat_join_request(context, context.client, cast(ChatJoinRequest, request))
+    else:
+        update = member_update()
+        user = update.new_chat_member.user
+        user.first_name, user.last_name, user.username = "Original First", "Original Last", "original_user"
+        await challenge.on_chat_member_updated(context, context.client, update)
+    try:
+        session = await context.registry.find(42, -1001)
+        assert session is not None
+        assert (session.user_username, session.user_first_name, session.user_last_name) == (
+            "original_user",
+            "Original First",
+            "Original Last",
+        )
+        # Updates or a failed lookup after removal must not change the saved audit identity.
+        user.username, user.first_name, user.last_name = None, "Changed", None
+        context.client.get_users.side_effect = RuntimeError("profile no longer available")
+        claimed = await context.registry.claim(session.key)
+        assert claimed is session
+        await challenge.challenge_timeout(context, claimed)
+        expected = settings.messages.failed_timeout.format(
+            targetuserid=42,
+            targetusername="original_user",
+            targetfirstname="Original First",
+            targetlastname="Original Last",
+            groupid=-1001,
+            grouptitle="group",
+        )
+        context.client.send_message.assert_awaited_with(settings.bot.log_channel_id, expected)
+        context.client.get_users.assert_not_awaited()
+    finally:
+        await context.registry.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_timeout_audit_handles_genuinely_missing_optional_profile_fields(settings: Settings) -> None:
+    context = context_for(settings)
+    request = SimpleNamespace(
+        from_user=User(id=42, first_name="Only First"),
+        chat=SimpleNamespace(id=-1001, title="group"),
+    )
+    await challenge.on_chat_join_request(context, context.client, cast(ChatJoinRequest, request))
+    try:
+        session = await context.registry.find(42, -1001)
+        assert session is not None
+        assert session.user_username is None and session.user_last_name is None
+        claimed = await context.registry.claim(session.key)
+        assert claimed is session
+        await challenge.challenge_timeout(context, claimed)
+        text = context.client.send_message.await_args.args[1]
+        assert "Only First" in text
+        assert "未设置" in text
+        assert "None" not in text
+    finally:
+        await context.registry.shutdown()
 
 
 @pytest.mark.asyncio

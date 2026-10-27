@@ -31,6 +31,9 @@ class ChallengeSession:
     turnstile_id: str | None = None
     join_request: bool = False
     timeout_task: asyncio.Task[None] | None = field(default=None, repr=False)
+    user_username: str | None = None
+    user_first_name: str | None = None
+    user_last_name: str | None = None
 
 
 TimeoutCallback = Callable[[ChallengeSession], Awaitable[None]]

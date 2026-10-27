@@ -123,6 +123,9 @@ async def on_chat_join_request(context: AppContext, client: Client, request: Cha
         answer=answer,
         turnstile_id=turnstile_id,
         join_request=True,
+        user_username=request.from_user.username,
+        user_first_name=request.from_user.first_name,
+        user_last_name=request.from_user.last_name,
     )
     await _register_session(context, session, policy.challenge_timeout)
 
@@ -166,6 +169,9 @@ async def on_chat_member_updated(context: AppContext, client: Client, update: Ch
                     chat_id=chat_id,
                     user_id=user_id,
                     chat_title=update.chat.title or str(chat_id),
+                    user_username=target.username,
+                    user_first_name=target.first_name,
+                    user_last_name=target.last_name,
                 )
                 await _register_session(context, cache, 5)
                 await client.ban_chat_member(chat_id, user_id, until_date=now + timedelta(seconds=31))
@@ -238,6 +244,9 @@ async def on_chat_member_updated(context: AppContext, client: Client, update: Ch
         message_id=reply.id,
         answer=answer,
         turnstile_id=turnstile_id,
+        user_username=target.username,
+        user_first_name=target.first_name,
+        user_last_name=target.last_name,
     )
     await _register_session(context, session, policy.challenge_timeout)
 
@@ -476,9 +485,9 @@ async def challenge_timeout(context: AppContext, session: ChallengeSession) -> N
         context,
         messages.failed_timeout.format(
             targetuserid=session.user_id,
-            targetusername="None",
-            targetfirstname="None",
-            targetlastname="None",
+            targetusername=session.user_username or "未设置",
+            targetfirstname=session.user_first_name or "未知",
+            targetlastname=session.user_last_name or "未设置",
             groupid=session.chat_id,
             grouptitle=session.chat_title,
         ),
