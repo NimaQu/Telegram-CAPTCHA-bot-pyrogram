@@ -9,7 +9,6 @@ from pyrogram.errors import BadRequest, ChatAdminRequired, RPCError
 from pyrogram.types import User
 
 from captcha_bot.context import AppContext
-from captcha_bot.handlers.common import send_log
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,7 +33,6 @@ class BanResult:
 async def leave_group(context: AppContext, chat_id: int) -> None:
     await context.client.send_message(chat_id, context.config.settings.messages.leave_message)
     await context.client.leave_chat(chat_id, delete=True)
-    await send_log(context, context.config.settings.messages.leave_group.format(groupid=chat_id))
 
 
 async def clean_deleted_users(context: AppContext) -> CleanResult:

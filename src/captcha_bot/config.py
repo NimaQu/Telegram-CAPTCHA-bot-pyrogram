@@ -153,7 +153,8 @@ class Messages(StrictModel):
     failed_auto_kick: str
     message_deleted: str
     into_group: str
-    leave_group: str
+    # 已停用：离开群组不再发送到日志频道，保留字段以兼容旧配置
+    leave_group: str = ""
     leave_message: str
     self_introduction: str
     challenge_not_for_you: str
@@ -319,7 +320,6 @@ def migrate_legacy_config(ini_path: str | Path, json_path: str | Path, output_pa
             "failed_auto_kick": legacy["msg_failed_auto_kick"],
             "message_deleted": legacy["msg_message_deleted"],
             "into_group": legacy["msg_into_group"],
-            "leave_group": legacy["msg_leave_group"],
             "leave_message": legacy["msg_leave_msg"],
             "self_introduction": defaults["msg_self_introduction"],
             "challenge_not_for_you": defaults["msg_challenge_not_for_you"],
