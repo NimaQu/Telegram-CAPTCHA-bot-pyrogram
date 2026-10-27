@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
 from datetime import timedelta
 from functools import partial
 
@@ -10,15 +9,15 @@ from pyrogram.enums import ChatMemberStatus
 from pyrogram.enums.chat_members_filter import ChatMembersFilter
 from pyrogram.errors import BadRequest, ChatAdminRequired, RPCError
 from pyrogram.handlers import MessageHandler
-from pyrogram.types import Message, User
+from pyrogram.types import Message
 
+from captcha_bot import admin_ops
 from captcha_bot.context import AppContext
 from captcha_bot.handlers.common import (
     can_restrict_members,
     extract_message_ids,
     is_bot_admin,
     schedule,
-    send_log,
     split_long_message,
     valid_ip,
 )
@@ -78,13 +77,11 @@ async def leave_command(context: AppContext, client: Client, message: Message) -
         return
     try:
         chat_id = int(arguments[1])
-        await client.send_message(chat_id, context.config.settings.messages.leave_message)
-        await client.leave_chat(chat_id, delete=True)
+        await admin_ops.leave_group(context, chat_id)
     except ValueError, RPCError:
         await message.reply("指令出错了！可能是 bot 不在参数所在群里。")
         return
     await message.reply(f"已离开群组: `{chat_id}`")
-    await send_log(context, context.config.settings.messages.leave_group.format(groupid=chat_id))
 
 
 async def clean_database(context: AppContext, client: Client, message: Message) -> None:
@@ -92,21 +89,8 @@ async def clean_database(context: AppContext, client: Client, message: Message) 
         return
     user_ids = await context.repository.all_blacklist_user_ids()
     await message.reply(f"开始整理数据库，请稍等...\n预计需要时间:{timedelta(seconds=len(user_ids) // 4)}")
-    deleted: list[int] = []
-    failures = 0
-    for user_id in user_ids:
-        try:
-            user = await client.get_users(user_id)
-        except BadRequest, IndexError:
-            failures += 1
-            deleted.append(user_id)
-            continue
-        if not isinstance(user, User):
-            user = user[0]
-        if user.is_deleted:
-            deleted.append(user_id)
-    await context.repository.remove_blacklist_users(deleted)
-    await message.reply(f"已成功清除{len(deleted)}个已经删号的用户，共有{failures}个用户信息获取失败。")
+    result = await admin_ops.clean_deleted_users(context)
+    await message.reply(f"已成功清除{len(result.deleted)}个已经删号的用户，共有{result.failures}个用户信息获取失败。")
 
 
 async def set_config(context: AppContext, client: Client, message: Message) -> None:
@@ -189,28 +173,18 @@ async def get_user_by_ip(context: AppContext, client: Client, message: Message) 
     if not valid_ip(ip_addr):
         await message.reply("IP 地址格式错误")
         return
-    logs = await context.repository.passed_users_by_ip(ip_addr)
-    if not logs:
+    groups = await admin_ops.passed_users_by_ip(context, ip_addr)
+    if not groups:
         await message.reply("没有找到通过该 IP 验证的用户")
         return
-    groups: dict[int, list[tuple[int, object]]] = defaultdict(list)
-    for group_id, user_id, last_passed_at in logs:
-        groups[group_id].append((user_id, last_passed_at))
-    titles: dict[int, str] = {}
-    for group_id in groups:
-        try:
-            chat = await client.get_chat(group_id)
-            titles[group_id] = chat.title or str(group_id)
-        except RPCError:
-            titles[group_id] = "无法获取群名"
-    unique_users = len({user_id for _, user_id, _ in logs})
-    text = (
-        f"IP `{ip_addr}` 通过验证的用户共 {unique_users} 个，用户/群记录 {len(logs)} 条，涉及 {len(groups)} 个群:\n\n"
-    )
-    for group_id, users in groups.items():
-        text += f"群组: {titles[group_id]} (`{group_id}`)\n"
+    records = sum(len(group.users) for group in groups)
+    unique_users = len({user_id for group in groups for user_id, _ in group.users})
+    text = f"IP `{ip_addr}` 通过验证的用户共 {unique_users} 个，用户/群记录 {records} 条，涉及 {len(groups)} 个群:\n\n"
+    for group in groups:
+        text += f"群组: {group.title} (`{group.group_id}`)\n"
         text += "".join(
-            f"- [用户](tg://user?id={user_id}) `{user_id}` 最近通过: `{passed_at}`\n" for user_id, passed_at in users
+            f"- [用户](tg://user?id={user_id}) `{user_id}` 最近通过: `{passed_at}`\n"
+            for user_id, passed_at in group.users
         )
         text += "\n"
     for chunk in split_long_message(text):
@@ -232,24 +206,17 @@ async def ban_user_by_ip(context: AppContext, client: Client, message: Message) 
     except ValueError:
         await message.reply("群组 ID 格式错误")
         return
-    user_ids = await context.repository.passed_user_ids_by_ip_and_group(ip_addr, group_id)
-    if not user_ids:
+    try:
+        result = await admin_ops.ban_users_by_ip(context, ip_addr, group_id)
+    except ChatAdminRequired:
+        await message.reply("封禁失败: Bot 在该群没有封禁用户权限")
+        return
+    if result is None:
         await message.reply("没有找到在该群通过这个 IP 验证的用户")
         return
-    failures: list[tuple[int, str]] = []
-    success = 0
-    for user_id in user_ids:
-        try:
-            await client.ban_chat_member(group_id, user_id)
-            success += 1
-        except ChatAdminRequired:
-            await message.reply("封禁失败: Bot 在该群没有封禁用户权限")
-            return
-        except RPCError as exc:
-            failures.append((user_id, str(exc)))
-    text = f"封禁完成: 成功 {success} 个，失败 {len(failures)} 个。"
-    if failures:
-        text += "\n\n失败列表:\n" + "".join(f"- `{user_id}`: `{error}`\n" for user_id, error in failures)
+    text = f"封禁完成: 成功 {result.success} 个，失败 {len(result.failures)} 个。"
+    if result.failures:
+        text += "\n\n失败列表:\n" + "".join(f"- `{user_id}`: `{error}`\n" for user_id, error in result.failures)
     for chunk in split_long_message(text):
         await message.reply(chunk)
 

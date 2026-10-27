@@ -21,6 +21,7 @@ from captcha_bot.config import ConfigStore, Settings
 from captcha_bot.db.repository import GroupOverrides
 from captcha_bot.handlers.common import ChatUnavailable, fetch_member_rights, member_rights
 from captcha_bot.miniapp import InitDataError, register_miniapp_routes, validate_init_data
+from captcha_bot.miniapp_admin import router as admin_router
 from captcha_bot.web import register_web_routes
 
 TOKEN = "123456:replace-me"
@@ -132,6 +133,7 @@ def miniapp_app(settings: Settings, user_member: Any) -> tuple[FastAPI, Any]:
     templates = Jinja2Templates(directory="templates")
     register_web_routes(app, templates)
     register_miniapp_routes(app, templates)
+    app.include_router(admin_router)
     bot_member = member(ChatMemberStatus.ADMINISTRATOR, can_delete_messages=True, can_restrict_members=False)
 
     async def get_chat_member(_chat_id: int, user_id: int | str) -> Any:
@@ -227,3 +229,16 @@ async def test_miniapp_reports_unavailable_chat(settings: Settings, error: Excep
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get(f"/miniapp/api/chats/{CHAT_ID}", headers=auth())
     assert response.status_code == status
+
+
+@pytest.mark.asyncio
+async def test_miniapp_me_reports_bot_admin(settings: Settings) -> None:
+    app, _ = miniapp_app(settings, member(ChatMemberStatus.MEMBER))
+    admin_id = settings.bot.admin_ids[0]
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.get("/miniapp/api/me", headers=auth(admin_id))).json() == {
+            "user_id": admin_id,
+            "is_bot_admin": True,
+        }
+        assert (await client.get("/miniapp/api/me", headers=auth())).json()["is_bot_admin"] is False
+        assert (await client.get("/miniapp/api/me")).status_code == 401

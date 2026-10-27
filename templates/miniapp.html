@@ -16,50 +16,95 @@
         <p class="hint" id="chat-id"></p>
     </header>
 
+    <nav class="tabs" id="tabs" hidden>
+        <button type="button" data-view="group">群组配置</button>
+        <button type="button" data-view="admin">Bot 管理</button>
+    </nav>
+
     <p class="status" id="status" role="status" aria-live="polite">正在校验权限…</p>
-    <p class="status warning" id="bot-warning" hidden></p>
 
-    <form id="config-form" hidden>
-        <section class="group">
-            <label class="row">
-                <span>验证方式</span>
-                <select name="challenge_type">
-                    <option value="math">数学题</option>
-                    <option value="recaptcha">Turnstile 网页验证</option>
+    <div id="group-view" hidden>
+        <p class="status warning" id="bot-warning" hidden></p>
+        <form id="config-form">
+            <section class="group">
+                <label class="row">
+                    <span>验证方式</span>
+                    <select name="challenge_type">
+                        <option value="math">数学题</option>
+                        <option value="recaptcha">Turnstile 网页验证</option>
+                    </select>
+                </label>
+                <label class="row">
+                    <span>验证超时（秒）</span>
+                    <input name="challenge_timeout" type="number" min="1" max="3600" step="1" required>
+                </label>
+            </section>
+
+            <section class="group">
+                <label class="row">
+                    <span>回答错误时</span>
+                    <select name="challenge_failed_action">
+                        <option value="kick">移出群组</option>
+                        <option value="ban">封禁</option>
+                    </select>
+                </label>
+                <label class="row">
+                    <span>超时未验证时</span>
+                    <select name="challenge_timeout_action">
+                        <option value="kick">移出群组</option>
+                        <option value="ban">封禁</option>
+                    </select>
+                </label>
+            </section>
+
+            <section class="group">
+                <label class="row">
+                    <span>启用全局黑名单</span>
+                    <input name="enable_global_blacklist" type="checkbox">
+                </label>
+            </section>
+
+            <button type="submit" id="save">保存</button>
+        </form>
+    </div>
+
+    <div id="admin-view" hidden>
+        <h2>验证记录</h2>
+        <form class="group stack" id="logs-form">
+            <div class="row">
+                <select name="kind" aria-label="查询方式">
+                    <option value="challenge_id">验证 ID</option>
+                    <option value="user_id">用户 ID</option>
                 </select>
-            </label>
-            <label class="row">
-                <span>验证超时（秒）</span>
-                <input name="challenge_timeout" type="number" min="1" max="3600" step="1" required>
-            </label>
-        </section>
+                <input name="value" type="text" required placeholder="输入要查询的 ID" autocomplete="off">
+            </div>
+            <button type="submit">查询</button>
+            <div class="results" id="logs-results"></div>
+        </form>
 
-        <section class="group">
-            <label class="row">
-                <span>回答错误时</span>
-                <select name="challenge_failed_action">
-                    <option value="kick">移出群组</option>
-                    <option value="ban">封禁</option>
-                </select>
-            </label>
-            <label class="row">
-                <span>超时未验证时</span>
-                <select name="challenge_timeout_action">
-                    <option value="kick">移出群组</option>
-                    <option value="ban">封禁</option>
-                </select>
-            </label>
-        </section>
+        <h2>按 IP 查询</h2>
+        <form class="group stack" id="ip-form">
+            <div class="row">
+                <input name="ip" type="text" required placeholder="例如 123.56.67.8" autocomplete="off" inputmode="decimal">
+            </div>
+            <button type="submit">查询通过验证的用户</button>
+            <div class="results" id="ip-results"></div>
+        </form>
 
-        <section class="group">
-            <label class="row">
-                <span>启用全局黑名单</span>
-                <input name="enable_global_blacklist" type="checkbox">
-            </label>
-        </section>
+        <h2>离开群组</h2>
+        <form class="group stack" id="leave-form">
+            <div class="row">
+                <input name="chat_id" type="text" required placeholder="群组 ID，例如 -1001234567890" autocomplete="off">
+            </div>
+            <button type="submit" class="danger">让 Bot 离开该群</button>
+        </form>
 
-        <button type="submit" id="save">保存</button>
-    </form>
+        <h2>维护</h2>
+        <section class="group stack">
+            <button type="button" id="reload">重载配置文件</button>
+            <button type="button" id="clean" class="danger">清理黑名单中已删号的用户</button>
+        </section>
+    </div>
 </main>
 <script src="{{ url_for('static', path='miniapp.js') }}"></script>
 </body>

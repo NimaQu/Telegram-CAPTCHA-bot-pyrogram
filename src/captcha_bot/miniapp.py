@@ -18,7 +18,7 @@ from pyrogram.errors import RPCError
 from captcha_bot.config import ChallengeType, DefaultPolicy, FailedAction
 from captcha_bot.context import AppContext
 from captcha_bot.db.repository import GroupOverrides
-from captcha_bot.handlers.common import NO_RIGHTS, ChatUnavailable, fetch_member_rights, send_log
+from captcha_bot.handlers.common import NO_RIGHTS, ChatUnavailable, fetch_member_rights, is_bot_admin, send_log
 
 logger = logging.getLogger(__name__)
 
@@ -113,18 +113,22 @@ def _context(request: Request) -> AppContext:
     return request.app.state.context
 
 
-async def authorize(request: Request, chat_id: int, authorization: str | None) -> AuthorizedChat:
-    context = _context(request)
-    settings = context.config.settings
+def authenticate(request: Request, authorization: str | None) -> InitData:
+    settings = _context(request).config.settings
     scheme, _, init_data = (authorization or "").partition(" ")
     if scheme.lower() != "tma" or not init_data:
         raise HTTPException(401, "缺少 Telegram 身份信息，请从 Telegram 内打开")
     try:
-        data = validate_init_data(
+        return validate_init_data(
             init_data, settings.bot.token.get_secret_value(), max_age=settings.web.miniapp_init_data_ttl
         )
     except InitDataError as exc:
         raise HTTPException(401, str(exc)) from exc
+
+
+async def authorize(request: Request, chat_id: int, authorization: str | None) -> AuthorizedChat:
+    context = _context(request)
+    data = authenticate(request, authorization)
     if chat_id >= 0:
         raise HTTPException(400, "群组 ID 无效")
     try:
@@ -164,6 +168,11 @@ def register_miniapp_routes(app: FastAPI, templates: Jinja2Templates) -> None:
     @app.get("/miniapp", response_class=HTMLResponse)
     async def miniapp_page(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(request=request, name="miniapp.html")
+
+    @app.get("/miniapp/api/me")
+    async def get_me(request: Request, authorization: Annotated[str | None, Header()] = None) -> dict[str, object]:
+        data = authenticate(request, authorization)
+        return {"user_id": data.user.id, "is_bot_admin": is_bot_admin(_context(request), data.user.id)}
 
     @app.get("/miniapp/api/chats/{chat_id}")
     async def get_chat_config(

@@ -112,3 +112,15 @@ async def test_chat_shared_and_start_open_miniapp(settings: Settings) -> None:
     start = message_for(chat_id=42, command=["start", "config_-1003"])
     await challenge.start_command(context, context.client, start)
     assert button(start).web_app.url == f"{settings.turnstile.base_url}/miniapp?chat_id=-1003"
+
+
+@pytest.mark.asyncio
+async def test_admin_panel_only_for_bot_admins(settings: Settings) -> None:
+    context = context_for(settings)
+    outsider = message_for(user_id=999, chat_id=999)
+    await config.admin_panel_command(context, context.client, outsider)
+    outsider.reply.assert_not_awaited()
+
+    admin = message_for(user_id=settings.bot.admin_ids[0], chat_id=settings.bot.admin_ids[0])
+    await config.admin_panel_command(context, context.client, admin)
+    assert button(admin).web_app.url == f"{settings.turnstile.base_url}/miniapp?view=admin"

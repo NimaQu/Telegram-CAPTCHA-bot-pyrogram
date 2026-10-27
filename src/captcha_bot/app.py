@@ -17,6 +17,7 @@ from captcha_bot.context import AppContext
 from captcha_bot.db.repository import Database, Repository
 from captcha_bot.handlers import register_admin_handlers, register_challenge_handlers, register_config_handlers
 from captcha_bot.miniapp import register_miniapp_routes
+from captcha_bot.miniapp_admin import router as miniapp_admin_router
 from captcha_bot.services import PolicyService, TurnstileService
 from captcha_bot.web import register_web_routes
 
@@ -86,4 +87,5 @@ def create_app(config_path: str | Path = "config.toml") -> FastAPI:
     templates = Jinja2Templates(directory=asset_root / "templates")
     register_web_routes(app, templates)
     register_miniapp_routes(app, templates)
+    app.include_router(miniapp_admin_router)
     return app

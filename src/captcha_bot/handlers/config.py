@@ -19,7 +19,7 @@ from pyrogram.types import (
 )
 
 from captcha_bot.context import AppContext
-from captcha_bot.handlers.common import ChatUnavailable, fetch_member_rights, schedule
+from captcha_bot.handlers.common import ChatUnavailable, fetch_member_rights, is_bot_admin, schedule
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,11 @@ REQUIRED_ADMIN_RIGHTS = "需要该群的管理员权限，且至少拥有「删�
 def miniapp_keyboard(context: AppContext, chat_id: int) -> InlineKeyboardMarkup:
     url = f"{context.config.settings.miniapp_url}?{urlencode({'chat_id': chat_id})}"
     return InlineKeyboardMarkup([[InlineKeyboardButton("打开配置面板", web_app=WebAppInfo(url=url))]])
+
+
+def admin_panel_keyboard(context: AppContext) -> InlineKeyboardMarkup:
+    url = f"{context.config.settings.miniapp_url}?{urlencode({'view': 'admin'})}"
+    return InlineKeyboardMarkup([[InlineKeyboardButton("打开管理面板", web_app=WebAppInfo(url=url))]])
 
 
 def chat_picker_keyboard() -> ReplyKeyboardMarkup:
@@ -101,6 +106,12 @@ async def private_config_command(_context: AppContext, _client: Client, message:
     )
 
 
+async def admin_panel_command(context: AppContext, _client: Client, message: Message) -> None:
+    if message.from_user is None or not is_bot_admin(context, message.from_user.id):
+        return
+    await message.reply("点击下方按钮打开 Bot 管理面板。", reply_markup=admin_panel_keyboard(context))
+
+
 async def chat_shared(context: AppContext, _client: Client, message: Message) -> None:
     shared = message.chat_shared
     if shared is None or shared.button_id != CHAT_PICKER_BUTTON_ID or shared.chat is None or shared.chat.id is None:
@@ -112,6 +123,7 @@ def register_config_handlers(client: Client, context: AppContext) -> None:
     handlers = [
         (group_config_command, filters.command("config") & filters.group),
         (private_config_command, filters.command("config") & filters.private),
+        (admin_panel_command, filters.command("admin") & filters.private),
         (chat_shared, filters.chat_shared & filters.private),
     ]
     for callback, handler_filter in handlers:
