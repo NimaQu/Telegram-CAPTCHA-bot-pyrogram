@@ -13,9 +13,9 @@ from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 
 from alembic import command
-from captcha_bot.config import Settings, load_settings
+from captcha_bot.config import ChallengeType, FailedAction, Settings, load_settings
 from captcha_bot.db.models import RecaptchaLogAction
-from captcha_bot.db.repository import Database, Repository
+from captcha_bot.db.repository import Database, GroupOverrides, Repository
 
 pytestmark = pytest.mark.integration
 
@@ -125,6 +125,12 @@ async def test_repository_concurrent_upserts_and_log_deduplication(
         assert overrides is not None
         assert overrides.challenge_timeout == 75
         assert overrides.challenge_type == "recaptcha"
+
+        replacement = GroupOverrides(30, FailedAction.BAN, FailedAction.KICK, ChallengeType.MATH, False)
+        await repository.save_group_overrides(-2002, replacement)
+        await repository.save_group_overrides(-2003, replacement)
+        assert await repository.get_group_overrides(-2002) == replacement
+        assert await repository.get_group_overrides(-2003) == replacement
 
         await asyncio.wait_for(
             asyncio.gather(*(repository.record_blacklist_timeout(datetime.now(), 99_999) for _ in range(20))),

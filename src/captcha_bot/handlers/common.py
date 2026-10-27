@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Coroutine
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from ipaddress import ip_address
 from typing import Any
@@ -10,8 +11,17 @@ from typing import Any
 from pyrogram import Client
 from pyrogram.enums import ChatMemberStatus
 from pyrogram.enums.chat_members_filter import ChatMembersFilter
-from pyrogram.errors import RPCError
-from pyrogram.types import ChatPermissions
+from pyrogram.errors import (
+    ChannelInvalid,
+    ChannelPrivate,
+    ChatAdminRequired,
+    ChatIdInvalid,
+    PeerIdInvalid,
+    RPCError,
+    UserIdInvalid,
+    UserNotParticipant,
+)
+from pyrogram.types import ChatMember, ChatPermissions
 
 from captcha_bot.config import FailedAction
 from captcha_bot.context import AppContext
@@ -31,6 +41,57 @@ async def can_restrict_members(client: Client, chat_id: int, user_id: int) -> bo
             return True
         return bool(member.privileges and member.privileges.can_restrict_members)
     return False
+
+
+class ChatUnavailable(Exception):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class MemberRights:
+    is_admin: bool
+    can_delete_messages: bool
+    can_restrict_members: bool
+
+    @property
+    def can_configure(self) -> bool:
+        return self.is_admin and self.can_delete_messages and self.can_restrict_members
+
+
+NO_RIGHTS = MemberRights(False, False, False)
+
+
+def member_rights(member: ChatMember) -> MemberRights:
+    if member.status == ChatMemberStatus.OWNER:
+        return MemberRights(True, True, True)
+    if member.status != ChatMemberStatus.ADMINISTRATOR:
+        return NO_RIGHTS
+    privileges = member.privileges
+    return MemberRights(
+        True,
+        bool(privileges and privileges.can_delete_messages),
+        bool(privileges and privileges.can_restrict_members),
+    )
+
+
+async def fetch_member_rights(client: Client, chat_id: int, user_id: int | str) -> MemberRights:
+    """每次实时查询 Telegram，不依赖本地缓存的管理员列表。"""
+    try:
+        return member_rights(await client.get_chat_member(chat_id, user_id))
+    except UserNotParticipant:
+        return NO_RIGHTS
+    except PeerIdInvalid, UserIdInvalid:
+        # Bot 尚未见过该用户时无法 resolve_peer，退回到实时拉取管理员列表
+        pass
+    except (ChannelPrivate, ChannelInvalid, ChatIdInvalid, ChatAdminRequired) as exc:
+        raise ChatUnavailable from exc
+    try:
+        async for member in client.get_chat_members(chat_id, filter=ChatMembersFilter.ADMINISTRATORS):
+            if member.user and member.user.id == user_id:
+                return member_rights(member)
+    except (ChannelPrivate, ChannelInvalid, ChatIdInvalid, ChatAdminRequired, PeerIdInvalid) as exc:
+        raise ChatUnavailable from exc
+    return NO_RIGHTS
 
 
 def full_chat_permissions() -> ChatPermissions:

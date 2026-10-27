@@ -15,6 +15,10 @@ host = "127.0.0.1"
 port = 5000
 debug = false
 trusted_proxy_cidrs = ["127.0.0.1/32", "::1/128"]
+# Mini App 的公网 HTTPS 地址，留空时使用 turnstile.base_url
+# public_url = "https://example.com"
+# Mini App initData 的最长有效期（秒）
+miniapp_init_data_ttl = 86400
 
 [proxy]
 

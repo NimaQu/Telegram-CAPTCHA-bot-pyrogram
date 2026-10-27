@@ -38,6 +38,7 @@ from captcha_bot.handlers.common import (
     schedule,
     send_log,
 )
+from captcha_bot.handlers.config import parse_config_start, send_miniapp_entry
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,10 @@ logger = logging.getLogger(__name__)
 async def start_command(context: AppContext, _client: Client, message: Message) -> None:
     if message.from_user is None or not message.command or len(message.command) != 2:
         await message.reply(context.config.settings.messages.start_message)
+        return
+    config_chat_id = parse_config_start(message.command[1])
+    if config_chat_id is not None:
+        await send_miniapp_entry(context, message, config_chat_id)
         return
     try:
         chat_id = int(message.command[1])

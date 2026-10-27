@@ -43,16 +43,24 @@ def register_web_routes(app: FastAPI, templates: Jinja2Templates) -> None:
     async def response_headers(request: Request, call_next):  # type: ignore[no-untyped-def]
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Robots-Tag"] = "noindex, nofollow"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; "
-            "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
-            "frame-src https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com; "
-            "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
-        )
+        if request.url.path == "/miniapp" or request.url.path.startswith("/miniapp/"):
+            # Telegram Web 客户端会在 iframe 中加载 Mini App
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; script-src 'self' https://telegram.org; "
+                "style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; "
+                "form-action 'self'; base-uri 'none'; frame-ancestors https://web.telegram.org"
+            )
+        else:
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; "
+                "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                "frame-src https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com; "
+                "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+            )
         response.headers["Cache-Control"] = "public, max-age=300" if request.url.path == "/" else "no-store"
         return response
 

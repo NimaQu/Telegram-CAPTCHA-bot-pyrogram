@@ -15,7 +15,8 @@ from captcha_bot.challenges import ChallengeRegistry
 from captcha_bot.config import ConfigStore, load_settings
 from captcha_bot.context import AppContext
 from captcha_bot.db.repository import Database, Repository
-from captcha_bot.handlers import register_admin_handlers, register_challenge_handlers
+from captcha_bot.handlers import register_admin_handlers, register_challenge_handlers, register_config_handlers
+from captcha_bot.miniapp import register_miniapp_routes
 from captcha_bot.services import PolicyService, TurnstileService
 from captcha_bot.web import register_web_routes
 
@@ -64,6 +65,7 @@ def create_app(config_path: str | Path = "config.toml") -> FastAPI:
             )
             register_admin_handlers(client, context)
             register_challenge_handlers(client, context)
+            register_config_handlers(client, context)
             app.state.context = context
             await client.start()
             logger.info("Telegram client and web service started")
@@ -81,5 +83,7 @@ def create_app(config_path: str | Path = "config.toml") -> FastAPI:
     workspace_root = Path(__file__).resolve().parents[2]
     asset_root = workspace_root if (workspace_root / "templates").is_dir() else Path(__file__).resolve().parent
     app.mount("/static", StaticFiles(directory=asset_root / "static"), name="static")
-    register_web_routes(app, Jinja2Templates(directory=asset_root / "templates"))
+    templates = Jinja2Templates(directory=asset_root / "templates")
+    register_web_routes(app, templates)
+    register_miniapp_routes(app, templates)
     return app

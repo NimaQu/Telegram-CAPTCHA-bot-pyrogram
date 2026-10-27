@@ -217,6 +217,19 @@ class Repository:
         async with self.sessions.begin() as session:
             await session.execute(statement)
 
+    async def save_group_overrides(self, group_id: int, overrides: GroupOverrides) -> None:
+        values: dict[str, Any] = {
+            "timeout": overrides.challenge_timeout,
+            "challenge_type": overrides.challenge_type.value,
+            "failed_action": overrides.challenge_failed_action.value,
+            "timeout_action": overrides.challenge_timeout_action.value,
+            "global_blacklist": overrides.enable_global_blacklist,
+        }
+        statement = insert(GroupConfig).values(chat_id=group_id, **values)
+        statement = statement.on_conflict_do_update(index_elements=[GroupConfig.chat_id], set_=values)
+        async with self.sessions.begin() as session:
+            await session.execute(statement)
+
     async def log_recaptcha(
         self,
         challenge_id: str,

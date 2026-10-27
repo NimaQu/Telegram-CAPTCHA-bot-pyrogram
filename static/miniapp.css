@@ -1,0 +1,112 @@
+:root {
+    color-scheme: light dark;
+    --bg: var(--tg-theme-secondary-bg-color, #f2f2f7);
+    --panel: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, #ffffff));
+    --text: var(--tg-theme-text-color, #000000);
+    --hint: var(--tg-theme-hint-color, #8e8e93);
+    --accent: var(--tg-theme-button-color, #2481cc);
+    --accent-text: var(--tg-theme-button-text-color, #ffffff);
+    --danger: var(--tg-theme-destructive-text-color, #d14e4e);
+    --line: color-mix(in srgb, var(--hint) 25%, transparent);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 16px;
+}
+
+.app {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: 20px 16px calc(24px + env(safe-area-inset-bottom));
+}
+
+.eyebrow,
+.hint {
+    margin: 0;
+    color: var(--hint);
+    font-size: 13px;
+}
+
+h1 {
+    margin: 4px 0;
+    font-size: 22px;
+    overflow-wrap: anywhere;
+}
+
+.status {
+    margin: 16px 0;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: var(--panel);
+}
+
+.status.error,
+.status.warning {
+    color: var(--danger);
+}
+
+.status.success {
+    color: var(--accent);
+}
+
+.group {
+    margin: 16px 0;
+    border-radius: 12px;
+    background: var(--panel);
+    overflow: hidden;
+}
+
+.row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 48px;
+    padding: 8px 14px;
+}
+
+.row + .row {
+    border-top: 1px solid var(--line);
+}
+
+select,
+input[type="number"] {
+    min-width: 0;
+    max-width: 55%;
+    padding: 6px 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    text-align: right;
+}
+
+input[type="checkbox"] {
+    width: 22px;
+    height: 22px;
+    accent-color: var(--accent);
+}
+
+button {
+    width: 100%;
+    padding: 14px;
+    border: 0;
+    border-radius: 12px;
+    background: var(--accent);
+    color: var(--accent-text);
+    font: inherit;
+    font-weight: 600;
+}
+
+button:disabled {
+    opacity: 0.6;
+}

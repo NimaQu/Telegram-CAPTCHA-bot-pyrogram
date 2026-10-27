@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="robots" content="noindex,nofollow">
+    <title>群组配置</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', path='miniapp.css') }}">
+</head>
+<body>
+<main class="app">
+    <header>
+        <p class="eyebrow">CAPTCHA Bot</p>
+        <h1 id="chat-title">群组配置</h1>
+        <p class="hint" id="chat-id"></p>
+    </header>
+
+    <p class="status" id="status" role="status" aria-live="polite">正在校验权限…</p>
+    <p class="status warning" id="bot-warning" hidden></p>
+
+    <form id="config-form" hidden>
+        <section class="group">
+            <label class="row">
+                <span>验证方式</span>
+                <select name="challenge_type">
+                    <option value="math">数学题</option>
+                    <option value="recaptcha">Turnstile 网页验证</option>
+                </select>
+            </label>
+            <label class="row">
+                <span>验证超时（秒）</span>
+                <input name="challenge_timeout" type="number" min="1" max="3600" step="1" required>
+            </label>
+        </section>
+
+        <section class="group">
+            <label class="row">
+                <span>回答错误时</span>
+                <select name="challenge_failed_action">
+                    <option value="kick">移出群组</option>
+                    <option value="ban">封禁</option>
+                </select>
+            </label>
+            <label class="row">
+                <span>超时未验证时</span>
+                <select name="challenge_timeout_action">
+                    <option value="kick">移出群组</option>
+                    <option value="ban">封禁</option>
+                </select>
+            </label>
+        </section>
+
+        <section class="group">
+            <label class="row">
+                <span>启用全局黑名单</span>
+                <input name="enable_global_blacklist" type="checkbox">
+            </label>
+        </section>
+
+        <button type="submit" id="save">保存</button>
+    </form>
+</main>
+<script src="{{ url_for('static', path='miniapp.js') }}"></script>
+</body>
+</html>

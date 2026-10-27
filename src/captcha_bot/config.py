@@ -85,6 +85,18 @@ class WebSettings(StrictModel):
     port: int = Field(default=5000, ge=1, le=65535, strict=True)
     debug: bool = Field(default=False, strict=True)
     trusted_proxy_cidrs: tuple[str, ...] = ("127.0.0.1/32", "::1/128")
+    public_url: str | None = None
+    miniapp_init_data_ttl: int = Field(default=86_400, gt=0, le=604_800, strict=True)
+
+    @field_validator("public_url")
+    @classmethod
+    def validate_public_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        url = str(TypeAdapter(AnyHttpUrl).validate_python(value)).rstrip("/")
+        if not url.startswith("https://"):
+            raise ValueError("web.public_url must use https (Telegram Mini Apps require it)")
+        return url
 
     @field_validator("trusted_proxy_cidrs")
     @classmethod
@@ -198,6 +210,10 @@ class Settings(StrictModel):
 
     def startup_fingerprint(self) -> tuple[object, ...]:
         return (self.bot, self.database, self.web, self.proxy, self.turnstile)
+
+    @property
+    def miniapp_url(self) -> str:
+        return f"{self.web.public_url or self.turnstile.base_url}/miniapp"
 
 
 def load_settings(path: str | Path) -> Settings:
