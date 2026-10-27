@@ -129,7 +129,7 @@ async def test_admin_ban_by_ip(settings: Settings) -> None:
         result = await client.post(url, headers=headers(settings), json={"group_id": -1001})
         assert result.json()["success"] == 1
         assert result.json()["failures"][0]["user_id"] == 8
-        assert "#BAN_BY_IP" in context.client.send_message.await_args.args[1]
+        context.client.send_message.assert_not_awaited()
 
         context.client.ban_chat_member.side_effect = ChatAdminRequired()
         assert (await client.post(url, headers=headers(settings), json={"group_id": -1001})).status_code == 409

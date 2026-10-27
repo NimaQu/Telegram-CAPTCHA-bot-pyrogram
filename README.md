@@ -103,7 +103,6 @@ Telegram 中的 `/reload` 会先完整校验 TOML。仅 `[defaults]` 与 `[messa
 
 - 页面请求通过 `Authorization: tma <initData>` 携带 Telegram 签名的身份信息，服务端用 Bot Token 校验 HMAC，并拒绝超过 `[web].miniapp_init_data_ttl` 秒（默认 24 小时）的 initData。
 - 每次读取或保存都会通过 `getChatMember` 实时检查用户在该群的权限，不依赖本地记录，因此管理员被撤销权限后立即失效。URL 里的群 ID 只是提示，不作为授权依据。
-- 每次保存会向日志频道发送 `#CONFIG_UPDATED` 记录。
 
 ### Bot 管理面板
 
@@ -117,7 +116,7 @@ Telegram 中的 `/reload` 会先完整校验 TOML。仅 `[defaults]` 与 `[messa
 | 重载配置文件 | `/reload` |
 | 清理黑名单中已删号的用户（后台执行，完成后私聊通知） | `/clean` |
 
-管理员从群配置入口打开 Mini App 时，页面顶部也会出现「Bot 管理」标签页。所有管理接口都会校验 initData，并检查用户是否在 `admin_ids` 中；按 IP 封禁会向日志频道发送 `#BAN_BY_IP` 记录。
+管理员从群配置入口打开 Mini App 时，页面顶部也会出现「Bot 管理」标签页。所有管理接口都会校验 initData，并检查用户是否在 `admin_ids` 中。
 
 部署要求：Mini App 必须通过 HTTPS 访问。默认使用 `turnstile.base_url` 作为公网地址，也可以在 `[web]` 中单独设置 `public_url`。页面地址为 `<public_url>/miniapp`，可以在 BotFather 中把它设为 Bot 的 Menu Button 或 Main Mini App；通过 `startapp=<群 ID>` 打开时同样可用。
 

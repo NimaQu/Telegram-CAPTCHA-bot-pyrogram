@@ -12,7 +12,7 @@ from pyrogram.errors import ChatAdminRequired, RPCError
 from captcha_bot import admin_ops
 from captcha_bot.context import AppContext
 from captcha_bot.db.repository import LogRecord
-from captcha_bot.handlers.common import is_bot_admin, schedule, send_log, valid_ip
+from captcha_bot.handlers.common import is_bot_admin, schedule, valid_ip
 from captcha_bot.miniapp import WebAppUser, authenticate
 
 logger = logging.getLogger(__name__)
@@ -155,10 +155,9 @@ async def ban_by_ip(
         raise HTTPException(409, "封禁失败: Bot 在该群没有封禁用户权限") from exc
     if result is None:
         raise HTTPException(404, "没有找到在该群通过这个 IP 验证的用户")
-    await send_log(
-        context,
-        f"#BAN_BY_IP\n管理员: {user.id}\nIP: {ip_addr}\n群组 ID: {payload.group_id}\n"
-        f"成功: {result.success}\n失败: {len(result.failures)}",
+    logger.info(
+        "banned users by IP via Mini App",
+        extra={"admin_id": user.id, "group_id": payload.group_id, "banned": result.success},
     )
     return {
         "success": result.success,

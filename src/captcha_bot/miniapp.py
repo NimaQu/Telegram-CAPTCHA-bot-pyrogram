@@ -18,7 +18,7 @@ from pyrogram.errors import RPCError
 from captcha_bot.config import ChallengeType, DefaultPolicy, FailedAction
 from captcha_bot.context import AppContext
 from captcha_bot.db.repository import GroupOverrides
-from captcha_bot.handlers.common import NO_RIGHTS, ChatUnavailable, fetch_member_rights, is_bot_admin, send_log
+from captcha_bot.handlers.common import NO_RIGHTS, ChatUnavailable, fetch_member_rights, is_bot_admin
 
 logger = logging.getLogger(__name__)
 
@@ -191,9 +191,5 @@ def register_miniapp_routes(app: FastAPI, templates: Jinja2Templates) -> None:
         chat = await authorize(request, chat_id, authorization)
         context = _context(request)
         await context.repository.save_group_overrides(chat_id, payload.to_overrides())
-        values = "\n".join(f"{key}: {value}" for key, value in payload.model_dump(mode="json").items())
-        await send_log(
-            context,
-            f"#CONFIG_UPDATED\n管理员: {chat.user.id}\n群组 ID: {chat_id}\n群组标题: {chat.title}\n{values}",
-        )
+        logger.info("group config updated via Mini App", extra={"chat_id": chat_id, "admin_id": chat.user.id})
         return await chat_state(context, chat)

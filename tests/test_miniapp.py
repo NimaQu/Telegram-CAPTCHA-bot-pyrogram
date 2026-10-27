@@ -205,7 +205,7 @@ async def test_miniapp_reads_and_updates_config(settings: Settings) -> None:
         )
         assert invalid.status_code == 422
     context.repository.save_group_overrides.assert_awaited_once()
-    assert "#CONFIG_UPDATED" in context.client.send_message.await_args.args[1]
+    context.client.send_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio
