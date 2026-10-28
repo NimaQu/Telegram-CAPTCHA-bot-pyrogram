@@ -131,6 +131,7 @@ class FakeClient:
     def __init__(self, *_args, **_kwargs) -> None:  # type: ignore[no-untyped-def]
         self.is_connected = False
         self.handlers: list[object] = []
+        self.commands: list[object] = []
 
     def add_handler(self, handler, group: int = 0) -> None:  # type: ignore[no-untyped-def]
         self.handlers.append((handler, group))
@@ -140,6 +141,10 @@ class FakeClient:
 
     async def stop(self) -> None:
         self.is_connected = False
+
+    async def set_bot_commands(self, commands, scope) -> bool:  # type: ignore[no-untyped-def]
+        self.commands.append((commands, scope))
+        return True
 
 
 @pytest.mark.asyncio
@@ -153,6 +158,7 @@ async def test_application_lifespan_owns_resources(monkeypatch) -> None:
     async with application.router.lifespan_context(application):
         assert application.state.context.client.is_connected
         assert application.state.context.client.handlers
+        assert application.state.context.client.commands
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=application), base_url="http://test") as client:
             assert (await client.get("/")).status_code == 200
     assert not application.state.context.client.is_connected

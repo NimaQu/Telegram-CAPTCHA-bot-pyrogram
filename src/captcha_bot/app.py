@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from pyrogram import Client
 
 from captcha_bot.challenges import ChallengeRegistry
+from captcha_bot.commands import sync_bot_commands
 from captcha_bot.config import ConfigStore, load_settings
 from captcha_bot.context import AppContext
 from captcha_bot.db.repository import Database, Repository
@@ -69,6 +70,7 @@ def create_app(config_path: str | Path = "config.toml") -> FastAPI:
             register_config_handlers(client, context)
             app.state.context = context
             await client.start()
+            await sync_bot_commands(client, initial_settings.bot.admin_ids)
             logger.info("Telegram client and web service started")
             yield
         finally:

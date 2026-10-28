@@ -118,6 +118,10 @@ Telegram 中的 `/reload` 会先完整校验 TOML。仅 `[defaults]` 与 `[messa
 
 管理员从群配置入口打开 Mini App 时，页面顶部也会出现「Bot 管理」标签页。所有管理接口都会校验 initData，并检查用户是否在 `admin_ids` 中。
 
+## 命令菜单
+
+Bot 启动时会自动设置命令菜单，无需在 BotFather 中 `/setcommands`：群聊显示 `/config`、`/help`，私聊显示 `/config`、`/sender`；`admin_ids` 中的管理员在与 Bot 的私聊里额外看到 `/admin`、`/getlog`、`/getuserbyip`、`/banuserbyip`、`/leave`、`/reload`、`/clean`、`/ping`。管理员需要先私聊过 Bot，否则无法为其设置专属菜单（日志中会有警告，私聊 Bot 后重启即可）。
+
 部署要求：Mini App 必须通过 HTTPS 访问。默认使用 `turnstile.base_url` 作为公网地址，也可以在 `[web]` 中单独设置 `public_url`。页面地址为 `<public_url>/miniapp`，可以在 BotFather 中把它设为 Bot 的 Menu Button 或 Main Mini App；通过 `startapp=<群 ID>` 打开时同样可用。
 
 ## 从 master 旧数据库迁移
