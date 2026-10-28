@@ -76,6 +76,28 @@ async def test_repository_reads_and_atomic_writes(settings: Settings) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("count", [0, 1, 499, 500, 501, 1000, 18_392])
+async def test_blacklist_deletion_is_bounded_and_preserves_requested_ids(count: int) -> None:
+    sessions = Sessions()
+    repository = Repository(cast(Any, sessions))
+    ids = list(range(1, count + 1))
+    await repository.remove_blacklist_users(ids)
+    batches = [call.args[0].compile().params["user_id_1"] for call in sessions.session.execute.await_args_list]
+    assert all(0 < len(batch) <= 500 for batch in batches)
+    assert [user_id for batch in batches for user_id in batch] == ids
+
+
+@pytest.mark.asyncio
+async def test_blacklist_deletion_single_id_is_supported() -> None:
+    sessions = Sessions()
+    repository = Repository(cast(Any, sessions))
+    await repository.remove_blacklist_users(42)
+    call = sessions.session.execute.await_args
+    assert call is not None
+    assert call.args[0].compile().params["user_id_1"] == [42]
+
+
+@pytest.mark.asyncio
 async def test_group_config_parsing_and_immediate_reads(settings: Settings) -> None:
     sessions = Sessions()
     repository = Repository(cast(Any, sessions))

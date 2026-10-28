@@ -111,6 +111,8 @@ class Database:
 
 
 class Repository:
+    # Stay below SQLite's historical default of 999 bound variables per statement.
+    DELETE_BATCH_SIZE: ClassVar[int] = 500
     GROUP_FIELDS: ClassVar[dict[str, str]] = {
         "challenge_failed_action": "failed_action",
         "challenge_timeout_action": "timeout_action",
@@ -162,7 +164,9 @@ class Repository:
         if not ids:
             return
         async with self.sessions.begin() as session:
-            await session.execute(delete(BlacklistUser).where(BlacklistUser.user_id.in_(ids)))
+            for offset in range(0, len(ids), self.DELETE_BATCH_SIZE):
+                batch = ids[offset : offset + self.DELETE_BATCH_SIZE]
+                await session.execute(delete(BlacklistUser).where(BlacklistUser.user_id.in_(batch)))
 
     async def all_blacklist_user_ids(self) -> list[int]:
         async with self.sessions() as session:

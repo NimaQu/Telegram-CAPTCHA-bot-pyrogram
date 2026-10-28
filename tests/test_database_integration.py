@@ -2,22 +2,92 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sqlite3
 import tomllib
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 import tomli_w
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, delete, event, insert, inspect, select, text
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
 from alembic import command
 from captcha_bot.config import ChallengeType, FailedAction, Settings, load_settings
-from captcha_bot.db.models import RecaptchaLogAction
+from captcha_bot.db.models import Base, BlacklistUser, RecaptchaLogAction
 from captcha_bot.db.repository import Database, GroupOverrides, Repository
 
 pytestmark = pytest.mark.integration
+
+
+class LimitedVariableConnection(sqlite3.Connection):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 999)
+
+
+@pytest.fixture
+async def limited_database(tmp_path: Path) -> AsyncIterator[AsyncEngine]:
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{(tmp_path / 'limited.sqlite').as_posix()}",
+        connect_args={"factory": LimitedVariableConnection},
+    )
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        yield engine
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_large_blacklist_cleanup_with_sqlite_variable_limit(limited_database: AsyncEngine) -> None:
+    sessions = async_sessionmaker(limited_database)
+    repository = Repository(sessions)
+    async with sessions.begin() as session:
+        await session.execute(insert(BlacklistUser), [{"user_id": user_id} for user_id in range(1, 18_395)])
+
+    # Reproduce the original failure using the old single-statement approach.
+    with pytest.raises(OperationalError, match="too many SQL variables"):
+        async with sessions.begin() as session:
+            await session.execute(delete(BlacklistUser).where(BlacklistUser.user_id.in_(range(1, 18_393))))
+
+    await repository.remove_blacklist_users(range(1, 18_393))
+    async with sessions() as session:
+        remaining = list(await session.scalars(select(BlacklistUser.user_id).order_by(BlacklistUser.user_id)))
+    assert remaining == [18_393, 18_394]
+
+
+@pytest.mark.asyncio
+async def test_chunked_blacklist_cleanup_rolls_back_all_batches(limited_database: AsyncEngine) -> None:
+    sessions = async_sessionmaker(limited_database)
+    repository = Repository(sessions)
+    async with sessions.begin() as session:
+        await session.execute(insert(BlacklistUser), [{"user_id": user_id} for user_id in range(1, 1002)])
+
+    delete_count = 0
+
+    @event.listens_for(limited_database.sync_engine, "before_cursor_execute")
+    def fail_second_batch(
+        _connection: Any, _cursor: Any, statement: str, _parameters: Any, _context: Any, _executemany: bool
+    ) -> None:
+        nonlocal delete_count
+        if statement.startswith("DELETE FROM blacklist_user"):
+            delete_count += 1
+            if delete_count == 2:
+                raise RuntimeError("simulated second batch failure")
+
+    try:
+        with pytest.raises(RuntimeError, match="second batch"):
+            await repository.remove_blacklist_users(range(1, 1002))
+    finally:
+        event.remove(limited_database.sync_engine, "before_cursor_execute", fail_second_batch)
+    assert delete_count == 2
+    assert await repository.all_blacklist_user_ids() == list(range(1, 1002))
 
 
 @pytest.mark.asyncio
