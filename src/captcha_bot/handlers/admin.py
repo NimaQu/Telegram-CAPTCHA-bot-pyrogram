@@ -14,8 +14,10 @@ from pyrogram.types import Message
 from captcha_bot import admin_ops
 from captcha_bot.context import AppContext
 from captcha_bot.handlers.common import (
+    ChatUnavailable,
     can_restrict_members,
     extract_message_ids,
+    fetch_member_rights,
     is_bot_admin,
     schedule,
     split_long_message,
@@ -36,7 +38,18 @@ async def reload_config(context: AppContext, _client: Client, message: Message) 
     await message.reply("配置已成功重载。")
 
 
-async def help_command(context: AppContext, _client: Client, message: Message) -> None:
+async def help_command(context: AppContext, client: Client, message: Message) -> None:
+    # 匿名管理员以群身份发言，from_user 为空
+    if message.from_user is not None and message.chat is not None and message.chat.id is not None:
+        try:
+            allowed = (await fetch_member_rights(client, message.chat.id, message.from_user.id)).can_configure
+        except ChatUnavailable, RPCError:
+            allowed = False
+        if not allowed:
+            reply = await message.reply("该命令需要群组管理员权限：删除消息、封禁/限制用户")
+            schedule(reply.delete(), delay=3, name=f"delete-help-reply:{reply.id}")
+            schedule(message.delete(), delay=3, name=f"delete-help-command:{message.id}")
+            return
     await message.reply(context.config.settings.messages.self_introduction, disable_web_page_preview=True)
 
 

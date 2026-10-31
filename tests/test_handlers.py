@@ -8,12 +8,14 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from pyrogram import Client
 from pyrogram.enums import ChatMemberStatus, ChatType
+from pyrogram.errors import ChannelPrivate
 from pyrogram.types import ChatJoinRequest, User
 
 from captcha_bot.challenges import ChallengeKind, ChallengeRegistry, ChallengeSession
 from captcha_bot.config import ChallengeType, Settings
 from captcha_bot.db.repository import BlacklistRecord
 from captcha_bot.handlers import admin, challenge
+from captcha_bot.handlers.common import MemberRights
 
 
 def context_for(settings: Settings, *, policy: Any | None = None) -> Any:
@@ -91,10 +93,13 @@ def close_schedule(coroutine: Any, **_kwargs: Any) -> None:
 async def test_basic_admin_commands_and_reload(settings: Settings) -> None:
     context = context_for(settings)
     message = message_for()
-    await admin.help_command(context, context.client, message)
+    anonymous_admin = message_for()
+    anonymous_admin.from_user = None
+    await admin.help_command(context, context.client, anonymous_admin)
+    assert anonymous_admin.reply.await_args.args[0] == settings.messages.self_introduction
     await admin.ping_command(context, context.client, message)
     await admin.reload_config(context, context.client, message)
-    assert message.reply.await_count == 3
+    assert message.reply.await_count == 2
 
     context.config.reload.side_effect = ValueError("bad")
     await admin.reload_config(context, context.client, message)
@@ -461,3 +466,33 @@ def test_registers_all_handlers(settings: Settings) -> None:
     admin.register_admin_handlers(client, context)
     challenge.register_challenge_handlers(client, context)
     assert add_handler.call_count == 17
+
+
+@pytest.mark.asyncio
+async def test_help_requires_group_admin(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    context = context_for(settings)
+    scheduled: list[tuple[str, float]] = []
+
+    def record_schedule(coroutine: Any, *, delay: float = 0, name: str) -> None:
+        coroutine.close()
+        scheduled.append((name, delay))
+
+    monkeypatch.setattr(admin, "schedule", record_schedule)
+    rights = AsyncMock(return_value=MemberRights(True, True, False))
+    monkeypatch.setattr(admin, "fetch_member_rights", rights)
+    denied = message_for()
+    await admin.help_command(context, context.client, denied)
+    assert "需要群组管理员权限" in denied.reply.await_args.args[0]
+    assert sorted(scheduled) == [("delete-help-command:50", 3), ("delete-help-reply:501", 3)]
+    rights.assert_awaited_once_with(context.client, -1001, 123456789)
+
+    rights.side_effect = ChannelPrivate()
+    unavailable = message_for()
+    await admin.help_command(context, context.client, unavailable)
+    assert "需要群组管理员权限" in unavailable.reply.await_args.args[0]
+
+    rights.side_effect = None
+    rights.return_value = MemberRights(True, True, True)
+    allowed = message_for()
+    await admin.help_command(context, context.client, allowed)
+    assert allowed.reply.await_args.args[0] == settings.messages.self_introduction
