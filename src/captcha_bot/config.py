@@ -141,6 +141,31 @@ class GeoIpSettings(StrictModel):
         return str(TypeAdapter(AnyHttpUrl).validate_python(value))
 
 
+class AntispamSettings(StrictModel):
+    # 用于加密各群 jev token 的密钥；留空则不提供反垃圾功能
+    # 可用 `python -c "import secrets; print(secrets.token_urlsafe(32))"` 生成
+    secret_key: SecretStr | None = None
+    api_url: str = "https://api.typesafe.ai/v1/systemone"
+    model: str = Field(default="jev-latest", min_length=1)
+    # jev 的图片输入是实验功能(需要 TypeSafe-Danger-Zone-Images 请求头)，出问题时可以在这里关掉
+    send_images: bool = Field(default=True, strict=True)
+    timeout_seconds: float = Field(default=15.0, gt=0, le=60, strict=True)
+    default_daily_limit: int = Field(default=500, gt=0, le=100_000, strict=True)
+    test_hourly_limit: int = Field(default=30, gt=0, le=1000, strict=True)
+
+    @field_validator("api_url")
+    @classmethod
+    def validate_api_url(cls, value: str) -> str:
+        url = str(TypeAdapter(AnyHttpUrl).validate_python(value))
+        if not url.startswith("https://"):
+            raise ValueError("antispam.api_url must use https")
+        return url
+
+    @property
+    def available(self) -> bool:
+        return self.secret_key is not None and bool(self.secret_key.get_secret_value())
+
+
 class DefaultPolicy(StrictModel):
     challenge_timeout: int = Field(default=60, gt=0, le=3600, strict=True)
     challenge_timeout_action: FailedAction = FailedAction.KICK
@@ -218,6 +243,7 @@ class Settings(StrictModel):
     proxy: ProxySettings = ProxySettings()
     turnstile: TurnstileSettings
     geoip: GeoIpSettings = GeoIpSettings()
+    antispam: AntispamSettings = AntispamSettings()
     defaults: DefaultPolicy = DefaultPolicy()
     messages: Messages
 
@@ -356,6 +382,7 @@ def migrate_legacy_config(ini_path: str | Path, json_path: str | Path, output_pa
 
 
 __all__ = [
+    "AntispamSettings",
     "ChallengeType",
     "ConfigStore",
     "DefaultPolicy",

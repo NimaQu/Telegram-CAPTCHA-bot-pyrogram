@@ -69,6 +69,7 @@ def web_app(settings, *, turnstile_success: bool = True) -> tuple[FastAPI, Any]:
         turnstile=FakeTurnstile(turnstile_success),
         policies=FakePolicies(settings.defaults),
         client=client,
+        antispam=SimpleNamespace(mark_new_member=AsyncMock()),
     )
     app.state.context = context
     return app, context

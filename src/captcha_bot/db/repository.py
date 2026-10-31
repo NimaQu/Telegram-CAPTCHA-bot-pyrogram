@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -14,7 +14,15 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from captcha_bot.config import ChallengeType, DefaultPolicy, FailedAction, Settings
-from captcha_bot.db.models import BlacklistUser, GroupConfig, RecaptchaLog, RecaptchaLogAction
+from captcha_bot.db.models import (
+    AntispamConfig,
+    AntispamPending,
+    AntispamUsage,
+    BlacklistUser,
+    GroupConfig,
+    RecaptchaLog,
+    RecaptchaLogAction,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +56,49 @@ class LogRecord:
 
     def __str__(self) -> str:
         return self.format(f"`{self.ip_addr}`")
+
+
+@dataclass(frozen=True, slots=True)
+class AntispamRecord:
+    chat_id: int
+    enabled: bool
+    api_key_encrypted: str | None
+    key_last4: str | None
+    key_set_by: int | None
+    key_set_by_name: str | None
+    key_set_at: datetime | None
+    disabled_reason: str | None
+    disabled_at: datetime | None
+    classifiers: str
+    action: str
+    act_threshold: int
+    log_threshold: int
+    daily_limit: int
+    rules: str
+
+
+@dataclass(frozen=True, slots=True)
+class AntispamRules:
+    classifiers: str
+    action: str
+    act_threshold: int
+    log_threshold: int
+    daily_limit: int
+    rules: str
+
+
+@dataclass(frozen=True, slots=True)
+class AntispamKeyOwner:
+    user_id: int | None
+    encrypted: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class UsageSummary:
+    today_calls: int
+    today_tokens: int
+    month_calls: int
+    month_tokens: int
 
 
 def async_database_url(url: str) -> str:
@@ -317,3 +368,197 @@ class Repository:
         )
         async with self.sessions() as session:
             return list(await session.scalars(statement))
+
+    # ---- 反垃圾 ----
+
+    @staticmethod
+    def _to_antispam(row: AntispamConfig) -> AntispamRecord:
+        return AntispamRecord(
+            chat_id=row.chat_id,
+            enabled=row.enabled,
+            api_key_encrypted=row.api_key_encrypted,
+            key_last4=row.key_last4,
+            key_set_by=row.key_set_by,
+            key_set_by_name=row.key_set_by_name,
+            key_set_at=row.key_set_at,
+            disabled_reason=row.disabled_reason,
+            disabled_at=row.disabled_at,
+            classifiers=row.classifiers,
+            action=row.action,
+            act_threshold=row.act_threshold,
+            log_threshold=row.log_threshold,
+            daily_limit=row.daily_limit,
+            rules=row.rules,
+        )
+
+    async def get_antispam(self, chat_id: int) -> AntispamRecord | None:
+        async with self.sessions() as session:
+            row = await session.get(AntispamConfig, chat_id)
+            return None if row is None else self._to_antispam(row)
+
+    async def _ensure_antispam_row(self, session: AsyncSession, chat_id: int, defaults: AntispamRules) -> None:
+        statement = insert(AntispamConfig).values(
+            chat_id=chat_id,
+            enabled=False,
+            failure_count=0,
+            classifiers=defaults.classifiers,
+            action=defaults.action,
+            act_threshold=defaults.act_threshold,
+            log_threshold=defaults.log_threshold,
+            daily_limit=defaults.daily_limit,
+            rules=defaults.rules,
+        )
+        await session.execute(statement.on_conflict_do_nothing(index_elements=[AntispamConfig.chat_id]))
+
+    async def save_antispam_rules(self, chat_id: int, rules: AntispamRules) -> None:
+        async with self.sessions.begin() as session:
+            await self._ensure_antispam_row(session, chat_id, rules)
+            await session.execute(
+                update(AntispamConfig)
+                .where(AntispamConfig.chat_id == chat_id)
+                .values(
+                    classifiers=rules.classifiers,
+                    action=rules.action,
+                    act_threshold=rules.act_threshold,
+                    log_threshold=rules.log_threshold,
+                    daily_limit=rules.daily_limit,
+                    rules=rules.rules,
+                    updated_at=datetime.now(),
+                )
+            )
+
+    async def set_antispam_key(
+        self,
+        chat_id: int,
+        *,
+        encrypted: str | None,
+        last4: str | None,
+        user_id: int | None,
+        user_name: str | None,
+        defaults: AntispamRules,
+    ) -> AntispamKeyOwner:
+        """设置(或清除) token，返回之前的设置者。设置新 token 视为一次手动开启。"""
+        async with self.sessions.begin() as session:
+            await self._ensure_antispam_row(session, chat_id, defaults)
+            row = await session.get(AntispamConfig, chat_id)
+            assert row is not None
+            previous = AntispamKeyOwner(row.key_set_by, row.api_key_encrypted)
+            row.api_key_encrypted = encrypted
+            row.key_last4 = last4
+            row.key_set_by = user_id
+            row.key_set_by_name = user_name
+            row.key_set_at = datetime.now() if encrypted else None
+            row.enabled = encrypted is not None
+            row.disabled_reason = None
+            row.disabled_at = None
+            row.failure_count = 0
+            row.first_failure_at = None
+        return previous
+
+    async def set_antispam_enabled(self, chat_id: int, enabled: bool) -> None:
+        values: dict[str, Any] = {"enabled": enabled, "failure_count": 0, "first_failure_at": None}
+        if enabled:
+            values |= {"disabled_reason": None, "disabled_at": None}
+        async with self.sessions.begin() as session:
+            await session.execute(update(AntispamConfig).where(AntispamConfig.chat_id == chat_id).values(**values))
+
+    async def disable_antispam(self, chat_id: int, reason: str, when: datetime) -> bool:
+        """自动关闭；只有本次调用真正把开关从开改成关时返回 True，避免重复通知。"""
+        statement = (
+            update(AntispamConfig)
+            .where(AntispamConfig.chat_id == chat_id, AntispamConfig.enabled.is_(True))
+            .values(enabled=False, disabled_reason=reason, disabled_at=when, failure_count=0, first_failure_at=None)
+            .returning(AntispamConfig.chat_id)
+        )
+        async with self.sessions.begin() as session:
+            return await session.scalar(statement) is not None
+
+    async def record_antispam_failure(self, chat_id: int, when: datetime) -> tuple[int, datetime]:
+        statement = (
+            update(AntispamConfig)
+            .where(AntispamConfig.chat_id == chat_id)
+            .values(
+                failure_count=AntispamConfig.failure_count + 1,
+                first_failure_at=func.coalesce(AntispamConfig.first_failure_at, when),
+            )
+            .returning(AntispamConfig.failure_count, AntispamConfig.first_failure_at)
+        )
+        async with self.sessions.begin() as session:
+            row = (await session.execute(statement)).one_or_none()
+        if row is None:
+            return 0, when
+        return int(row.failure_count), row.first_failure_at or when
+
+    async def reset_antispam_failures(self, chat_id: int) -> None:
+        async with self.sessions.begin() as session:
+            await session.execute(
+                update(AntispamConfig)
+                .where(AntispamConfig.chat_id == chat_id, AntispamConfig.failure_count > 0)
+                .values(failure_count=0, first_failure_at=None)
+            )
+
+    async def add_antispam_pending(self, chat_id: int, user_id: int, when: datetime) -> None:
+        statement = insert(AntispamPending).values(chat_id=chat_id, user_id=user_id, passed_at=when)
+        statement = statement.on_conflict_do_update(
+            index_elements=[AntispamPending.chat_id, AntispamPending.user_id], set_={"passed_at": when}
+        )
+        async with self.sessions.begin() as session:
+            await session.execute(statement)
+
+    async def pop_antispam_pending(self, chat_id: int, user_id: int, max_age: timedelta) -> bool:
+        statement = (
+            delete(AntispamPending)
+            .where(AntispamPending.chat_id == chat_id, AntispamPending.user_id == user_id)
+            .returning(AntispamPending.passed_at)
+        )
+        async with self.sessions.begin() as session:
+            passed_at = await session.scalar(statement)
+            # 顺手清理一直没发言的旧记录
+            await session.execute(delete(AntispamPending).where(AntispamPending.passed_at < datetime.now() - max_age))
+        return passed_at is not None and datetime.now() - passed_at <= max_age
+
+    async def add_antispam_usage(self, chat_id: int, day: date, input_tokens: int) -> None:
+        statement = insert(AntispamUsage).values(
+            chat_id=chat_id, day=day, calls=1, input_tokens=input_tokens, limit_notified=False
+        )
+        statement = statement.on_conflict_do_update(
+            index_elements=[AntispamUsage.chat_id, AntispamUsage.day],
+            set_={
+                "calls": AntispamUsage.calls + 1,
+                "input_tokens": AntispamUsage.input_tokens + input_tokens,
+            },
+        )
+        async with self.sessions.begin() as session:
+            await session.execute(statement)
+
+    async def antispam_calls(self, chat_id: int, day: date) -> int:
+        async with self.sessions() as session:
+            row = await session.get(AntispamUsage, (chat_id, day))
+            return 0 if row is None else row.calls
+
+    async def mark_antispam_limit_notified(self, chat_id: int, day: date) -> bool:
+        statement = (
+            update(AntispamUsage)
+            .where(
+                AntispamUsage.chat_id == chat_id,
+                AntispamUsage.day == day,
+                AntispamUsage.limit_notified.is_(False),
+            )
+            .values(limit_notified=True)
+            .returning(AntispamUsage.chat_id)
+        )
+        async with self.sessions.begin() as session:
+            return await session.scalar(statement) is not None
+
+    async def antispam_usage(self, chat_id: int, today: date) -> UsageSummary:
+        month_start = today.replace(day=1)
+        statement = select(AntispamUsage).where(AntispamUsage.chat_id == chat_id, AntispamUsage.day >= month_start)
+        async with self.sessions() as session:
+            rows = (await session.scalars(statement)).all()
+        today_rows = [row for row in rows if row.day == today]
+        return UsageSummary(
+            today_calls=sum(row.calls for row in today_rows),
+            today_tokens=sum(row.input_tokens for row in today_rows),
+            month_calls=sum(row.calls for row in rows),
+            month_tokens=sum(row.input_tokens for row in rows),
+        )

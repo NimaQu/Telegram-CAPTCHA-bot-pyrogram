@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import httpx
 from pyrogram import Client
 
+from captcha_bot.antispam import AntispamService
 from captcha_bot.challenges import ChallengeRegistry
 from captcha_bot.config import ConfigStore
 from captcha_bot.db.repository import Database, Repository
@@ -23,3 +24,4 @@ class AppContext:
     turnstile: TurnstileService
     client: Client
     geoip: GeoIpService
+    antispam: AntispamService

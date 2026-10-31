@@ -52,6 +52,7 @@ def context_for(settings: Settings, *, policy: Any | None = None) -> Any:
         repository=repository,
         policies=SimpleNamespace(get=AsyncMock(return_value=policy or settings.defaults)),
         geoip=SimpleNamespace(format=AsyncMock(side_effect=lambda ip: f"`{ip}` (测试归属地)")),
+        antispam=SimpleNamespace(mark_new_member=AsyncMock()),
         registry=ChallengeRegistry(),
     )
 

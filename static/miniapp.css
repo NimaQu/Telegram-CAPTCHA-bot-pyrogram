@@ -150,7 +150,9 @@ h2 {
     padding: 0;
 }
 
-.stack input[type="text"] {
+.stack input[type="text"],
+.stack input[type="password"],
+.stack textarea {
     flex: 1;
     min-width: 0;
     max-width: none;
@@ -196,4 +198,77 @@ button.danger {
     margin-top: 8px;
     padding: 8px;
     font-size: 14px;
+}
+
+.stack textarea {
+    width: 100%;
+    resize: vertical;
+}
+
+.row input.threshold {
+    width: 72px;
+    max-width: 72px;
+}
+
+.row .name {
+    flex: 1;
+}
+
+.row .name small {
+    display: block;
+    color: var(--hint);
+    font-size: 12px;
+}
+
+label.file {
+    display: grid;
+    gap: 6px;
+    color: var(--hint);
+    font-size: 14px;
+}
+
+button.secondary {
+    background: var(--panel);
+    color: var(--accent);
+}
+
+.custom {
+    margin-bottom: 12px;
+}
+
+.meta {
+    margin: 0;
+    color: var(--hint);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+.score {
+    display: grid;
+    gap: 4px;
+}
+
+.score .bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--line);
+    overflow: hidden;
+}
+
+.score .bar span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+}
+
+.score.hit .bar span {
+    background: var(--danger);
+}
+
+[hidden] {
+    display: none !important;
+}
+
+#antispam-usage {
+    margin: 12px 4px;
 }

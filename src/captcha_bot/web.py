@@ -144,6 +144,7 @@ def register_web_routes(app: FastAPI, templates: Jinja2Templates) -> None:
             user_agent,
             RecaptchaLogAction.PASSED,
         )
+        await context.antispam.mark_new_member(session.chat_id, session.user_id)
         await send_log(
             context,
             context.config.settings.messages.passed_answer.format(

@@ -11,15 +11,23 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pyrogram import Client
 
+from captcha_bot.antispam import AntispamService
 from captcha_bot.challenges import ChallengeRegistry
 from captcha_bot.commands import sync_bot_commands
 from captcha_bot.config import ConfigStore, load_settings
 from captcha_bot.context import AppContext
 from captcha_bot.db.repository import Database, Repository
 from captcha_bot.geoip import GeoIpService
-from captcha_bot.handlers import register_admin_handlers, register_challenge_handlers, register_config_handlers
+from captcha_bot.handlers import (
+    register_admin_handlers,
+    register_antispam_handlers,
+    register_challenge_handlers,
+    register_config_handlers,
+)
+from captcha_bot.jev import JevClient
 from captcha_bot.miniapp import register_miniapp_routes
 from captcha_bot.miniapp_admin import router as miniapp_admin_router
+from captcha_bot.miniapp_antispam import router as miniapp_antispam_router
 from captcha_bot.services import PolicyService, TurnstileService
 from captcha_bot.web import register_web_routes
 
@@ -56,6 +64,13 @@ def create_app(config_path: str | Path = "config.toml") -> FastAPI:
                 proxy=proxy,
             )
             policies = PolicyService(config, repository)
+            antispam_settings = initial_settings.antispam
+            jev = JevClient(
+                http,
+                url=antispam_settings.api_url,
+                model=antispam_settings.model,
+                timeout=antispam_settings.timeout_seconds,
+            )
             context = AppContext(
                 config=config,
                 database=database,
@@ -66,10 +81,12 @@ def create_app(config_path: str | Path = "config.toml") -> FastAPI:
                 turnstile=TurnstileService(http, config),
                 client=client,
                 geoip=GeoIpService(lambda: config.settings.geoip.qqwry_path),
+                antispam=AntispamService(config, repository, jev),
             )
             register_admin_handlers(client, context)
             register_challenge_handlers(client, context)
             register_config_handlers(client, context)
+            register_antispam_handlers(client, context)
             app.state.context = context
             await client.start()
             await sync_bot_commands(client, initial_settings.bot.admin_ids)
@@ -92,4 +109,5 @@ def create_app(config_path: str | Path = "config.toml") -> FastAPI:
     register_web_routes(app, templates)
     register_miniapp_routes(app, templates)
     app.include_router(miniapp_admin_router)
+    app.include_router(miniapp_antispam_router)
     return app

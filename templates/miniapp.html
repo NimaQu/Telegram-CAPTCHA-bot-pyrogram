@@ -25,6 +25,11 @@
 
     <div id="group-view" hidden>
         <p class="status warning" id="bot-warning" hidden></p>
+        <nav class="tabs" id="group-tabs">
+            <button type="button" data-panel="captcha" class="active">入群验证</button>
+            <button type="button" data-panel="antispam">AI 反垃圾</button>
+        </nav>
+        <div id="captcha-panel">
         <form id="config-form">
             <section class="group">
                 <label class="row">
@@ -66,6 +71,89 @@
 
             <button type="submit" id="save">保存</button>
         </form>
+        </div>
+
+        <div id="antispam-panel" hidden>
+            <p class="status warning" id="antispam-unavailable" hidden></p>
+            <p class="status warning" id="antispam-disabled" hidden></p>
+            <p class="hint">只检查每个新成员通过验证后的第一条消息，连同头像、昵称和简介一起交给 TypeSafe jev 判断。</p>
+
+            <section class="group">
+                <label class="row">
+                    <span>启用 AI 反垃圾</span>
+                    <input id="antispam-enabled" type="checkbox">
+                </label>
+            </section>
+
+            <h2>jev Token</h2>
+            <form class="group stack" id="key-form">
+                <p class="meta" id="key-info"></p>
+                <div class="row">
+                    <input name="api_key" type="password" required minlength="8" placeholder="粘贴新的 token" autocomplete="off">
+                </div>
+                <button type="submit">验证并保存 token</button>
+                <button type="button" id="key-clear" class="danger" hidden>清除 token</button>
+            </form>
+
+            <nav class="tabs" id="antispam-tabs">
+                <button type="button" data-pane="settings" class="active">设置</button>
+                <button type="button" data-pane="test">测试</button>
+            </nav>
+
+            <form id="antispam-form">
+                <h2>分类器</h2>
+                <p class="hint">勾选要拦截的类型；阈值留空时使用下方的处置阈值。</p>
+                <section class="group" id="classifier-list"></section>
+
+                <h2>自定义分类器(最多 3 个)</h2>
+                <div id="custom-list"></div>
+                <button type="button" id="custom-add" class="secondary">添加自定义分类器</button>
+
+                <h2>判定与处置</h2>
+                <section class="group">
+                    <label class="row">
+                        <span>处置阈值(%)</span>
+                        <input name="act_threshold" type="number" min="1" max="100" step="1" required>
+                    </label>
+                    <label class="row">
+                        <span>记录阈值(%)</span>
+                        <input name="log_threshold" type="number" min="0" max="100" step="1" required>
+                    </label>
+                    <label class="row">
+                        <span>处置动作</span>
+                        <select name="action"></select>
+                    </label>
+                    <label class="row">
+                        <span>每日调用上限</span>
+                        <input name="daily_limit" type="number" min="1" max="100000" step="1" required>
+                    </label>
+                </section>
+                <p class="hint">概率达到处置阈值就执行处置动作；介于记录阈值和处置阈值之间的只发到日志频道，不处置。</p>
+
+                <h2>本群补充规则</h2>
+                <section class="group stack">
+                    <textarea name="rules" maxlength="300" rows="3" placeholder="例如：本群允许发 GitHub 链接"></textarea>
+                </section>
+
+                <p class="hint" id="antispam-usage"></p>
+                <button type="submit">保存反垃圾设置</button>
+            </form>
+
+            <form id="test-form" hidden>
+                <p class="hint">使用上方表单里的设置(包括还没保存的修改)判断一条消息。每次测试会消耗本群的 token。</p>
+                <section class="group stack">
+                    <textarea name="text" rows="4" maxlength="4000" placeholder="要测试的消息内容"></textarea>
+                    <div class="row"><input name="sender_name" type="text" maxlength="128" placeholder="发送者昵称(可选)"></div>
+                    <div class="row"><input name="username" type="text" maxlength="64" placeholder="用户名(可选)"></div>
+                    <div class="row"><input name="bio" type="text" maxlength="200" placeholder="个人简介(可选)"></div>
+                    <div class="row"><input name="forwarded_from" type="text" maxlength="128" placeholder="转发自哪个频道(可选)"></div>
+                    <label class="file">消息图片(最多 4 张，JPG/PNG)<input name="images" type="file" accept="image/jpeg,image/png" multiple></label>
+                    <label class="file">发送者头像(可选)<input name="avatar" type="file" accept="image/jpeg,image/png"></label>
+                    <button type="submit">开始测试</button>
+                    <div class="results" id="test-results"></div>
+                </section>
+            </form>
+        </div>
     </div>
 
     <div id="admin-view" hidden>

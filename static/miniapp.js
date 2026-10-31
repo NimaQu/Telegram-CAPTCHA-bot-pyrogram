@@ -122,6 +122,249 @@
         return api(`chats/${encodeURIComponent(chatId)}`, { method: "GET" }).then(render);
     }
 
+    function switcher(nav, attribute, panes) {
+        nav.addEventListener("click", (event) => {
+            const name = event.target.dataset && event.target.dataset[attribute];
+            if (!name) return;
+            for (const [key, pane] of Object.entries(panes)) pane.hidden = key !== name;
+            for (const button of nav.querySelectorAll("button")) {
+                button.classList.toggle("active", button.dataset[attribute] === name);
+            }
+        });
+    }
+
+    function readFile(file) {
+        return new Promise((resolve, reject) => {
+            if (file.size > 2 * 1024 * 1024) {
+                reject(new Error(`${file.name} 超过 2 MB`));
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(new Error(`无法读取 ${file.name}`));
+            reader.readAsDataURL(file);
+        });
+    }
+
+    function thresholdInput(value) {
+        const input = element("input", undefined, "threshold");
+        input.type = "number";
+        input.min = "1";
+        input.max = "100";
+        input.step = "1";
+        input.placeholder = "默认";
+        input.setAttribute("aria-label", "单独的处置阈值(%)");
+        if (value) input.value = value;
+        return input;
+    }
+
+    function optionalNumber(input) {
+        return input.value === "" ? null : Number(input.value);
+    }
+
+    function setupAntispam(chatId) {
+        const base = `chats/${encodeURIComponent(chatId)}/antispam`;
+        const form = document.getElementById("antispam-form");
+        const testForm = document.getElementById("test-form");
+        const keyForm = document.getElementById("key-form");
+        const enabled = document.getElementById("antispam-enabled");
+        const classifierList = document.getElementById("classifier-list");
+        const customList = document.getElementById("custom-list");
+        const customAdd = document.getElementById("custom-add");
+        const keyClear = document.getElementById("key-clear");
+        let state = null;
+
+        switcher(document.getElementById("group-tabs"), "panel", {
+            captcha: document.getElementById("captcha-panel"),
+            antispam: document.getElementById("antispam-panel"),
+        });
+        switcher(document.getElementById("antispam-tabs"), "pane", { settings: form, test: testForm });
+
+        function addCustom(item) {
+            const card = element("section", undefined, "group stack custom");
+            const fields = [
+                ["name", "名称，例如：招聘广告", 20],
+                ["yes", "判为「是」的情况", 200],
+                ["no", "判为「否」的情况", 200],
+            ];
+            for (const [name, placeholder, maxLength] of fields) {
+                const input = element("input");
+                input.type = "text";
+                input.name = name;
+                input.placeholder = placeholder;
+                input.maxLength = maxLength;
+                input.required = true;
+                input.value = item[name] || "";
+                const row = element("div", undefined, "row");
+                row.append(input);
+                card.append(row);
+            }
+            const options = element("label", undefined, "row");
+            const toggle = element("input");
+            toggle.type = "checkbox";
+            toggle.name = "enabled";
+            toggle.checked = item.enabled !== false;
+            options.append(element("span", "启用", "name"), thresholdInput(item.threshold), toggle);
+            const remove = element("button", "删除这个分类器", "danger");
+            remove.type = "button";
+            remove.addEventListener("click", () => {
+                card.remove();
+                customAdd.hidden = customList.children.length >= 3;
+            });
+            card.append(options, remove);
+            customList.append(card);
+            customAdd.hidden = customList.children.length >= 3;
+        }
+
+        function render(next) {
+            state = next;
+            const unavailable = document.getElementById("antispam-unavailable");
+            unavailable.hidden = state.available;
+            unavailable.textContent = "Bot 管理员还没有在配置文件中启用 AI 反垃圾，暂时无法使用。";
+            const disabled = document.getElementById("antispam-disabled");
+            disabled.hidden = !state.disabled_reason || state.enabled;
+            disabled.textContent = `已于 ${formatTime(state.disabled_at)} 自动关闭：${state.disabled_reason}\n处理好之后请重新开启。`;
+            enabled.checked = state.enabled;
+            enabled.disabled = !state.available || !state.key.set;
+
+            const key = state.key;
+            document.getElementById("key-info").textContent = key.set
+                ? `已设置 ····${key.last4 || ""} · 由 ${key.set_by_name || "未知"}${key.mine ? "(你)" : ""} 于 ${formatTime(key.set_at)} 设置。出于安全原因无法查看，只能替换或清除。`
+                : "还没有设置 token。设置后其他管理员只能替换，无法查看。";
+            keyClear.hidden = !key.set;
+
+            const config = state.config;
+            classifierList.replaceChildren();
+            for (const item of state.classifiers) {
+                const setting = config.builtin[item.id];
+                const row = element("label", undefined, "row");
+                row.dataset.id = item.id;
+                const name = element("span", item.name, "name");
+                name.append(element("small", item.yes));
+                const toggle = element("input");
+                toggle.type = "checkbox";
+                toggle.checked = setting.enabled;
+                row.append(name, thresholdInput(setting.threshold), toggle);
+                classifierList.append(row);
+            }
+            customList.replaceChildren();
+            for (const item of config.custom) addCustom(item);
+            customAdd.hidden = config.custom.length >= 3;
+
+            const action = form.elements.action;
+            action.replaceChildren(...state.actions.map((item) => new Option(item.label, item.value)));
+            action.value = config.action;
+            form.elements.act_threshold.value = config.act_threshold;
+            form.elements.log_threshold.value = config.log_threshold;
+            form.elements.daily_limit.value = config.daily_limit;
+            form.elements.rules.value = config.rules;
+            const usage = state.usage;
+            document.getElementById("antispam-usage").textContent =
+                `今日调用 ${usage.today_calls} 次(${usage.today_tokens} tokens)，本月 ${usage.month_calls} 次(${usage.month_tokens} tokens)`;
+        }
+
+        function collectConfig() {
+            const builtin = {};
+            for (const row of classifierList.children) {
+                builtin[row.dataset.id] = {
+                    enabled: row.querySelector('input[type="checkbox"]').checked,
+                    threshold: optionalNumber(row.querySelector("input.threshold")),
+                };
+            }
+            const custom = [...customList.children].map((card) => ({
+                name: card.querySelector('[name="name"]').value.trim(),
+                yes: card.querySelector('[name="yes"]').value.trim(),
+                no: card.querySelector('[name="no"]').value.trim(),
+                enabled: card.querySelector('[name="enabled"]').checked,
+                threshold: optionalNumber(card.querySelector("input.threshold")),
+            }));
+            return {
+                builtin,
+                custom,
+                action: form.elements.action.value,
+                act_threshold: Number(form.elements.act_threshold.value),
+                log_threshold: Number(form.elements.log_threshold.value),
+                daily_limit: Number(form.elements.daily_limit.value),
+                rules: form.elements.rules.value.trim(),
+            };
+        }
+
+        customAdd.addEventListener("click", () => addCustom({}));
+
+        form.addEventListener("submit", (event) => {
+            event.preventDefault();
+            run(form.querySelector('button[type="submit"]'), async () => {
+                render(await api(base, { method: "PUT", body: JSON.stringify(collectConfig()) }));
+                return "反垃圾设置已保存。";
+            });
+        });
+
+        keyForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            const apiKey = keyForm.elements.api_key.value.trim();
+            run(keyForm.querySelector('button[type="submit"]'), async () => {
+                render(await api(`${base}/key`, { method: "PUT", body: JSON.stringify({ api_key: apiKey }) }));
+                keyForm.elements.api_key.value = "";
+                return "token 验证通过并已保存，AI 反垃圾已开启。";
+            });
+        });
+
+        keyClear.addEventListener("click", async () => {
+            if (!(await confirmAction("确定清除 token 吗？AI 反垃圾会随之关闭。"))) return;
+            run(keyClear, async () => {
+                render(await api(`${base}/key`, { method: "DELETE" }));
+                return "token 已清除。";
+            });
+        });
+
+        enabled.addEventListener("change", () => {
+            const wanted = enabled.checked;
+            enabled.checked = !wanted;
+            run(enabled, async () => {
+                render(await api(`${base}/enabled`, { method: "PUT", body: JSON.stringify({ enabled: wanted }) }));
+                return wanted ? "AI 反垃圾已开启。" : "AI 反垃圾已关闭。";
+            });
+        });
+
+        testForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            const results = document.getElementById("test-results");
+            run(testForm.querySelector('button[type="submit"]'), async () => {
+                const files = [...testForm.elements.images.files];
+                if (files.length > 4) throw new Error("最多上传 4 张图片");
+                const avatarFile = testForm.elements.avatar.files[0];
+                const payload = {
+                    config: collectConfig(),
+                    text: testForm.elements.text.value,
+                    sender_name: testForm.elements.sender_name.value.trim() || "测试用户",
+                    username: testForm.elements.username.value.trim() || null,
+                    bio: testForm.elements.bio.value.trim() || null,
+                    forwarded_from: testForm.elements.forwarded_from.value.trim() || null,
+                    images: await Promise.all(files.map(readFile)),
+                    avatar: avatarFile ? await readFile(avatarFile) : null,
+                };
+                const result = await api(`${base}/test`, { method: "POST", body: JSON.stringify(payload) });
+                const outcomes = { act: "会处置", log: "只记录到日志频道", pass: "放行" };
+                results.replaceChildren(element("p", `结果：${outcomes[result.outcome]}`));
+                if (payload.images.length || payload.avatar) {
+                    results.append(element("p", result.images_sent ? "图片已送检" : "图片没有送检(未开启或被 jev 拒绝)", "meta"));
+                }
+                for (const score of result.scores) {
+                    const card = element("div", undefined, score.hit ? "score hit" : "score");
+                    const bar = element("div", undefined, "bar");
+                    const fill = element("span");
+                    fill.style.width = `${score.percent}%`;
+                    bar.append(fill);
+                    card.append(element("p", `${score.name}：${score.percent}%(阈值 ${score.threshold}%)`, "meta"), bar);
+                    results.append(card);
+                }
+                status.hidden = true;
+            });
+        });
+
+        return api(base, { method: "GET" }).then(render);
+    }
+
     function renderLogs(container, logs) {
         container.replaceChildren();
         if (logs.length === 0) {
@@ -249,6 +492,7 @@
         if (chatId && !wantsAdmin) {
             try {
                 await setupGroupView(chatId);
+                await setupAntispam(chatId);
             } catch (error) {
                 showStatus(error.message, "error");
                 if (me.is_bot_admin) selectView("admin");

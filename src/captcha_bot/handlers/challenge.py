@@ -315,6 +315,7 @@ async def private_math_callback(context: AppContext, client: Client, query: Call
         await client.edit_message_text(
             session.user_id, query.message.id, context.config.settings.messages.challenge_passed
         )
+        await context.antispam.mark_new_member(chat_id, session.user_id)
         await send_log(
             context,
             context.config.settings.messages.passed_answer.format(
@@ -363,6 +364,7 @@ async def admin_callback(context: AppContext, client: Client, query: CallbackQue
             message_id,
             context.config.settings.messages.approved.format(user=query.from_user.first_name),
         )
+        await context.antispam.mark_new_member(chat_id, session.user_id)
         await send_log(
             context,
             context.config.settings.messages.passed_admin.format(
@@ -422,6 +424,7 @@ async def math_callback(context: AppContext, client: Client, query: CallbackQuer
             await client.edit_message_text(chat_id, message_id, context.config.settings.messages.challenge_passed)
         except MessageNotModified:
             logger.info("challenge result message already updated", extra={"challenge_key": key})
+        await context.antispam.mark_new_member(chat_id, session.user_id)
         await send_log(
             context,
             context.config.settings.messages.passed_answer.format(

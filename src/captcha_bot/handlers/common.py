@@ -9,7 +9,7 @@ from ipaddress import ip_address
 from typing import Any
 
 from pyrogram import Client
-from pyrogram.enums import ChatMemberStatus
+from pyrogram.enums import ChatMemberStatus, ParseMode
 from pyrogram.enums.chat_members_filter import ChatMembersFilter
 from pyrogram.errors import (
     ChannelInvalid,
@@ -106,9 +106,11 @@ def full_chat_permissions() -> ChatPermissions:
     )
 
 
-async def send_log(context: AppContext, text: str) -> None:
+async def send_log(context: AppContext, text: str, *, plain: bool = False) -> None:
+    # plain=True 时不解析格式，用于包含用户原文的日志
+    kwargs: dict[str, Any] = {"parse_mode": ParseMode.DISABLED} if plain else {}
     try:
-        await context.client.send_message(context.config.settings.bot.log_channel_id, text)
+        await context.client.send_message(context.config.settings.bot.log_channel_id, text, **kwargs)
     except RPCError:
         logger.exception("failed to send audit message")
 

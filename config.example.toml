@@ -34,6 +34,19 @@ timeout_seconds = 10.0
 qqwry_path = "qqwry.dat"
 download_url = "https://github.com/metowolf/qqwry.dat/releases/latest/download/qqwry.dat"
 
+[antispam]
+# 按群 AI 反垃圾（TypeSafe jev），各群管理员在配置面板里填写自己的 token
+# 用于加密 token 的密钥，留空则不提供该功能；生成方式：python -c "import secrets; print(secrets.token_urlsafe(32))"
+# 更换密钥后已保存的 token 都会失效，需要管理员重新填写
+# secret_key = "replace-me"
+api_url = "https://api.typesafe.ai/v1/systemone"
+model = "jev-latest"
+# 同时发送头像和消息图片（jev 的图片输入是实验功能）
+send_images = true
+timeout_seconds = 15.0
+default_daily_limit = 500
+test_hourly_limit = 30
+
 [defaults]
 challenge_timeout = 60
 challenge_timeout_action = "kick"
