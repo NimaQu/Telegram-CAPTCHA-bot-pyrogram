@@ -502,7 +502,7 @@ async def test_report_votes_then_jev_removes_spam(report_env: SimpleNamespace) -
 
     command.delete.assert_awaited_once()
     poll = env.client.send_message.await_args
-    assert poll.kwargs["reply_to_message_id"] == 10
+    assert poll.kwargs["reply_parameters"].message_id == 10
     assert "(1/3)" in poll.kwargs["reply_markup"].inline_keyboard[0][0].text
 
     await report.vote_callback(env.context, env.client, vote_query(20))
@@ -576,7 +576,9 @@ async def test_report_rejections(report_env: SimpleNamespace) -> None:
         command = report_message(reporter, target)
         await report.report_command(env.context, env.client, command)
         command.delete.assert_awaited_once()
-        return command.reply.await_args.args[0]
+        hint = env.client.send_message.await_args
+        assert hint.args[0] == CHAT_ID
+        return hint.args[1]
 
     assert "没有开启" in await hint_of(20, message(empty=False))
     await enable(env, report_votes=0)
@@ -586,7 +588,8 @@ async def test_report_rejections(report_env: SimpleNamespace) -> None:
     assert "不能被举报" in await hint_of(20, message(empty=False, from_user=user(1)))
     assert "不能被举报" in await hint_of(20, message(empty=False, from_user=user(30, is_bot=True)))
     assert "自己" in await hint_of(7, message(empty=False))
-    env.client.send_message.assert_not_awaited()
+    # 只发了提示，没有发起投票
+    assert all("reply_parameters" not in call.kwargs for call in env.client.send_message.await_args_list)
 
 
 @pytest.mark.asyncio
@@ -640,7 +643,7 @@ async def test_debug_channel_gets_forward_and_verdict(debug_env: SimpleNamespace
 
     env.client.forward_messages.assert_awaited_once_with(DEBUG_CHANNEL, CHAT_ID, [10])
     (reply,) = debug_replies(env)
-    assert reply.kwargs["reply_to_message_id"] == 77
+    assert reply.kwargs["reply_parameters"].message_id == 77
     assert "结果: 删除并禁言" in reply.args[1]
     assert "✅ 广告引流: 97% (阈值 85%)" in reply.args[1]
     assert reply.kwargs["reply_markup"].inline_keyboard[0][0].callback_data == f"as:undo:7:{CHAT_ID}"

@@ -20,6 +20,7 @@ from pyrogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
+    ReplyParameters,
     User,
 )
 
@@ -298,7 +299,11 @@ async def reply_debug(
     kwargs: dict[str, Any] = {"reply_markup": markup} if markup else {}
     try:
         await client.send_message(
-            channel, text, reply_to_message_id=debug_message_id, parse_mode=ParseMode.DISABLED, **kwargs
+            channel,
+            text,
+            reply_parameters=ReplyParameters(message_id=debug_message_id),
+            parse_mode=ParseMode.DISABLED,
+            **kwargs,
         )
     except RPCError:
         logger.exception("failed to reply in antispam debug channel")

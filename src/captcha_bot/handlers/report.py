@@ -10,7 +10,7 @@ from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
 from pyrogram.errors import MessageDeleteForbidden, RPCError
 from pyrogram.handlers import CallbackQueryHandler, MessageHandler
-from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyParameters
 
 from captcha_bot.antispam import AntispamAction, ReportVote, report_context
 from captcha_bot.context import AppContext
@@ -49,9 +49,10 @@ async def _is_admin(client: Client, chat_id: int, user_id: int) -> bool:
         return False
 
 
-async def _hint(message: Message, text: str) -> None:
+async def _hint(client: Client, chat_id: int, text: str) -> None:
+    # /report 命令已经删掉了，不能再回复它
     try:
-        reply = await message.reply(text, quote=False)
+        reply = await client.send_message(chat_id, text, parse_mode=ParseMode.DISABLED)
         schedule(reply.delete(), delay=HINT_DELETE_SECONDS, name=f"delete-report-hint:{reply.id}")
     except RPCError:
         logger.info("failed to send report hint")
@@ -160,18 +161,18 @@ async def report_command(context: AppContext, client: Client, message: Message) 
     record = await context.repository.get_antispam(chat_id) if antispam.available else None
     needed = antispam.group_config(record).report_votes if record else 0
     if record is None or not record.enabled or needed == 0:
-        await _hint(message, "本群没有开启举报功能。")
+        await _hint(client, chat_id, "本群没有开启举报功能。")
         return
     target = message.reply_to_message
     if target is None or target.empty:
-        await _hint(message, "请回复要举报的消息再发送 /report。")
+        await _hint(client, chat_id, "请回复要举报的消息再发送 /report。")
         return
     author = target.from_user
     if author is None or author.is_bot or await _is_admin(client, chat_id, author.id):
-        await _hint(message, "这条消息不能被举报。")
+        await _hint(client, chat_id, "这条消息不能被举报。")
         return
     if author.id == reporter.id:
-        await _hint(message, "不能举报自己的消息。")
+        await _hint(client, chat_id, "不能举报自己的消息。")
         return
     key = (chat_id, target.id)
     vote = antispam.reports.get(key)
@@ -180,7 +181,7 @@ async def report_command(context: AppContext, client: Client, message: Message) 
             chat_id,
             f"{display_name(reporter)} 举报了这条消息。如果你也认为它是垃圾信息，请点击下方按钮，"
             f"满 {needed} 人后交给 AI 判断。",
-            reply_to_message_id=target.id,
+            reply_parameters=ReplyParameters(message_id=target.id),
             parse_mode=ParseMode.DISABLED,
             reply_markup=vote_keyboard(target.id, 1, needed),
         )
