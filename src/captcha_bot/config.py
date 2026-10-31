@@ -152,6 +152,8 @@ class AntispamSettings(StrictModel):
     timeout_seconds: float = Field(default=15.0, gt=0, le=60, strict=True)
     default_daily_limit: int = Field(default=500, gt=0, le=100_000, strict=True)
     test_hourly_limit: int = Field(default=30, gt=0, le=1000, strict=True)
+    # 调试用：送检的消息先转发到这个频道，再回复 jev 的判断结果；留空不转发
+    debug_channel_id: int | None = Field(default=None, strict=True)
 
     @field_validator("api_url")
     @classmethod

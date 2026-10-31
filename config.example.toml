@@ -46,6 +46,8 @@ send_images = true
 timeout_seconds = 15.0
 default_daily_limit = 500
 test_hourly_limit = 30
+# 调试用频道，送检的消息会先转发到这里，再回复 jev 的判断结果和解封按钮；Bot 需要是频道管理员
+# debug_channel_id = -1001234567890
 
 [defaults]
 challenge_timeout = 60

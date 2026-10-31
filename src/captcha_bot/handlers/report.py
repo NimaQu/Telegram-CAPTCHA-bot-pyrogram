@@ -23,6 +23,7 @@ from captcha_bot.handlers.antispam import (
     media_group,
     prepare,
     reason_text,
+    report_debug,
     undo_keyboard,
 )
 from captcha_bot.handlers.common import ChatUnavailable, fetch_member_rights, schedule, send_log
@@ -106,6 +107,7 @@ async def _judge(context: AppContext, client: Client, vote: ReportVote, chat_tit
         return
     user = target.from_user
     messages = await media_group(client, target)
+    source = f"举报({len(vote.voters)} 人)"
     judged = await judge_messages(
         context,
         client,
@@ -114,29 +116,33 @@ async def _judge(context: AppContext, client: Client, vote: ReportVote, chat_tit
         messages,
         user,
         chat_title,
+        source=source,
         jev_context=report_context(chat_title, len(vote.voters)),
     )
     if judged is None:
         await _edit_poll(client, vote, "AI 暂时无法判断，请等待管理员处理。")
         return
-    verdict, spam = judged
-    source = f"举报({len(vote.voters)} 人)"
+    verdict, spam = judged.verdict, judged.spam
     if verdict.outcome == "pass":
         await _edit_poll(client, vote, "AI 认为这条消息不是垃圾信息，未做处理。")
+        await report_debug(context, client, judged, record, user, chat_title, source, "放行", undo=False)
         return
     if verdict.outcome == "log":
         text = log_text(verdict, chat_title, vote.chat_id, user, spam.text, "未处置(可疑)", source)
         await send_log(context, text, plain=True)
         await _edit_poll(client, vote, "AI 不能确定这条消息是否为垃圾信息，已记录给管理员查看。")
+        await report_debug(context, client, judged, record, user, chat_title, source, "可疑，仅记录", undo=False)
         return
     label = await enforce(context, client, record, messages, user, verdict, spam, chat_title, source)
     action = context.antispam.group_config(record).action
+    undo = action != AntispamAction.DELETE
     await _edit_poll(
         client,
         vote,
         f"AI 判定 {display_name(user)} 的消息为垃圾信息({reason_text(verdict)})，已{label}。",
-        undo_keyboard(user.id) if action != AntispamAction.DELETE else None,
+        undo_keyboard(user.id) if undo else None,
     )
+    await report_debug(context, client, judged, record, user, chat_title, source, label, undo=undo)
 
 
 async def report_command(context: AppContext, client: Client, message: Message) -> None:

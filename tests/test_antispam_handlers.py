@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock
 from urllib.parse import urlencode
 
@@ -20,7 +20,7 @@ from fastapi import FastAPI
 from fastapi.templating import Jinja2Templates
 from pydantic import SecretStr
 from pyrogram.enums import ChatMemberStatus, ParseMode
-from pyrogram.errors import ChatAdminRequired, MessageDeleteForbidden, UserIsBlocked
+from pyrogram.errors import ChatAdminRequired, MessageDeleteForbidden, RPCError, UserIsBlocked
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -609,3 +609,87 @@ async def test_report_poll_expires(report_env: SimpleNamespace) -> None:
     assert env.service.reports == {}
     await report._expire(env.context, env.client, vote)
     env.client.delete_messages.assert_awaited_once()
+
+
+# ---- debug 频道 ----
+
+DEBUG_CHANNEL = -100999
+
+
+@pytest.fixture
+def debug_env(env: SimpleNamespace) -> SimpleNamespace:
+    settings = env.context.config.settings
+    antispam = settings.antispam.model_copy(update={"debug_channel_id": DEBUG_CHANNEL})
+    env.context.config._settings = settings.model_copy(update={"antispam": antispam})
+    env.client.forward_messages = AsyncMock(return_value=[SimpleNamespace(id=77)])
+    return env
+
+
+def debug_replies(env: SimpleNamespace) -> list[Any]:
+    return [call for call in env.client.send_message.await_args_list if call.args[0] == DEBUG_CHANNEL]
+
+
+@pytest.mark.asyncio
+async def test_debug_channel_gets_forward_and_verdict(debug_env: SimpleNamespace) -> None:
+    env = debug_env
+    await enable(env)
+    await env.service.mark_new_member(CHAT_ID, 7)
+    env.fake.responses.append(answers(ad=0.97, scam=0.2))
+
+    await handlers.check_first_message(env.context, env.client, message())
+
+    env.client.forward_messages.assert_awaited_once_with(DEBUG_CHANNEL, CHAT_ID, [10])
+    (reply,) = debug_replies(env)
+    assert reply.kwargs["reply_to_message_id"] == 77
+    assert "结果: 删除并禁言" in reply.args[1]
+    assert "✅ 广告引流: 97% (阈值 85%)" in reply.args[1]
+    assert reply.kwargs["reply_markup"].inline_keyboard[0][0].callback_data == f"as:undo:7:{CHAT_ID}"
+
+    query = SimpleNamespace(
+        id="q",
+        data=f"as:undo:7:{CHAT_ID}",
+        from_user=SimpleNamespace(id=settings_admin(env), first_name="Root", last_name=None),
+        message=SimpleNamespace(id=500, chat=SimpleNamespace(id=DEBUG_CHANNEL)),
+    )
+    env.client.get_chat_member.return_value = member(ChatMemberStatus.MEMBER)
+    await handlers.undo_callback(env.context, env.client, cast(Any, query))
+    env.client.unban_chat_member.assert_awaited_once_with(CHAT_ID, 7)
+    assert env.client.edit_message_text.await_args.args[:2] == (DEBUG_CHANNEL, 500)
+
+
+def settings_admin(env: SimpleNamespace) -> int:
+    return env.context.config.settings.bot.admin_ids[0]
+
+
+@pytest.mark.asyncio
+async def test_debug_channel_pass_failure_and_forward_error(debug_env: SimpleNamespace) -> None:
+    env = debug_env
+    await enable(env)
+    for user_id in (7, 8, 9):
+        await env.service.mark_new_member(CHAT_ID, user_id)
+    env.fake.responses += [answers(ad=0.1), httpx.Response(500, text="boom")]
+
+    await handlers.check_first_message(env.context, env.client, message(from_user=user(7)))
+    await handlers.check_first_message(env.context, env.client, message(from_user=user(8)))
+    passed, failed = debug_replies(env)
+    assert "结果: 放行" in passed.args[1] and "reply_markup" not in passed.kwargs
+    assert "jev 请求失败: HTTP 500: boom" in failed.args[1]
+
+    env.client.forward_messages.side_effect = RPCError()
+    env.fake.responses.append(answers(ad=0.1))
+    await handlers.check_first_message(env.context, env.client, message(from_user=user(9)))
+    assert len(debug_replies(env)) == 2
+    assert len(env.fake.requests) == 3
+
+
+@pytest.mark.asyncio
+async def test_debug_channel_for_reports(debug_env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = debug_env
+    monkeypatch.setattr(report, "schedule", lambda coroutine, **_kwargs: coroutine.close())
+    env.client.get_chat_member = AsyncMock(side_effect=rights_by_user({1}))
+    env.client.get_messages = AsyncMock(return_value=message(empty=False))
+    await enable(env, report_votes=1, action="delete")
+    env.fake.responses.append(answers(ad=0.6))
+    await report.report_command(env.context, env.client, report_message(20, message(empty=False)))
+    (reply,) = debug_replies(env)
+    assert "来源: 举报(1 人)" in reply.args[1] and "可疑，仅记录" in reply.args[1]

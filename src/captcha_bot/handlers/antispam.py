@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import html
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from functools import partial
 from io import BytesIO
+from typing import Any
 
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
@@ -36,6 +38,7 @@ from captcha_bot.handlers.common import (
     ChatUnavailable,
     fetch_member_rights,
     full_chat_permissions,
+    is_bot_admin,
     schedule,
     send_log,
 )
@@ -199,8 +202,10 @@ async def handle_failure(context: AppContext, record: AntispamRecord, error: Jev
     )
 
 
-def undo_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton("误判，恢复", callback_data=f"{UNDO_PREFIX}{user_id}")]])
+def undo_keyboard(user_id: int, chat_id: int | None = None) -> InlineKeyboardMarkup:
+    # 在 debug 频道里按钮不在群内，需要带上群 ID
+    data = f"{UNDO_PREFIX}{user_id}" if chat_id is None else f"{UNDO_PREFIX}{user_id}:{chat_id}"
+    return InlineKeyboardMarkup([[InlineKeyboardButton("误判，恢复", callback_data=data)]])
 
 
 async def apply_action(client: Client, chat_id: int, user_id: int, action: AntispamAction) -> None:
@@ -259,6 +264,74 @@ async def media_group(client: Client, message: Message) -> list[Message]:
         return [message]
 
 
+@dataclass(frozen=True, slots=True)
+class Judged:
+    verdict: Verdict
+    spam: SpamInput
+    # 转发到 debug 频道的那条消息，用来回复判断结果
+    debug_message_id: int | None
+
+
+async def forward_to_debug(context: AppContext, client: Client, messages: list[Message]) -> int | None:
+    channel = context.antispam.settings.debug_channel_id
+    if channel is None or not messages or messages[0].chat is None or messages[0].chat.id is None:
+        return None
+    try:
+        forwarded = await client.forward_messages(channel, messages[0].chat.id, [item.id for item in messages])
+    except RPCError:
+        logger.exception("failed to forward message to antispam debug channel")
+        return None
+    first = forwarded[0] if isinstance(forwarded, list) else forwarded
+    return getattr(first, "id", None)
+
+
+async def reply_debug(
+    context: AppContext,
+    client: Client,
+    debug_message_id: int | None,
+    text: str,
+    markup: InlineKeyboardMarkup | None = None,
+) -> None:
+    channel = context.antispam.settings.debug_channel_id
+    if channel is None or debug_message_id is None:
+        return
+    kwargs: dict[str, Any] = {"reply_markup": markup} if markup else {}
+    try:
+        await client.send_message(
+            channel, text, reply_to_message_id=debug_message_id, parse_mode=ParseMode.DISABLED, **kwargs
+        )
+    except RPCError:
+        logger.exception("failed to reply in antispam debug channel")
+
+
+async def report_debug(
+    context: AppContext,
+    client: Client,
+    judged: Judged,
+    record: AntispamRecord,
+    user: User,
+    chat_title: str,
+    source: str,
+    result: str,
+    *,
+    undo: bool,
+) -> None:
+    verdict = judged.verdict
+    lines = []
+    for score in sorted(verdict.scores, key=lambda item: -item.percent):
+        mark = "✅" if score in verdict.hits else "·"
+        lines.append(f"{mark} {score.classifier.name}: {score.percent}% (阈值 {score.classifier.threshold}%)")
+    scores = "\n".join(lines) or "没有启用的分类器"
+    text = (
+        f"#ANTISPAM_DEBUG\n来源: {source}\n群组: {chat_title} ({record.chat_id})\n"
+        f"用户: {display_name(user)} ({user.id})\n结果: {result}\n"
+        f"图片: {'已送检' if verdict.images_sent else '无'} · tokens: {verdict.input_tokens}\n\n{scores}"
+    )
+    await reply_debug(
+        context, client, judged.debug_message_id, text, undo_keyboard(user.id, record.chat_id) if undo else None
+    )
+
+
 async def judge_messages(
     context: AppContext,
     client: Client,
@@ -268,19 +341,24 @@ async def judge_messages(
     user: User,
     chat_title: str,
     *,
+    source: str,
     jev_context: str | None = None,
-) -> tuple[Verdict, SpamInput] | None:
+) -> Judged | None:
     """送 jev 判断并记账；失败时按规则计数或自动关闭，返回 None。"""
     antispam = context.antispam
+    debug_message_id = await forward_to_debug(context, client, messages)
     spam = await collect_input(client, messages, user, with_images=antispam.settings.send_images)
     try:
         verdict = await antispam.evaluate(api_key, antispam.group_config(record), spam, chat_title, context=jev_context)
     except JevError as exc:
+        await reply_debug(
+            context, client, debug_message_id, f"#ANTISPAM_DEBUG\n来源: {source}\njev 请求失败: {exc.describe()}"
+        )
         await handle_failure(context, record, exc, chat_title)
         return None
     await context.repository.add_antispam_usage(record.chat_id, date.today(), verdict.input_tokens)
     await context.repository.reset_antispam_failures(record.chat_id)
-    return verdict, spam
+    return Judged(verdict, spam, debug_message_id)
 
 
 async def enforce(
@@ -331,19 +409,24 @@ async def check_first_message(context: AppContext, client: Client, message: Mess
         return
     record, api_key = prepared
     messages = await media_group(client, message)
-    judged = await judge_messages(context, client, record, api_key, messages, user, chat_title)
+    source = "新成员首条消息"
+    judged = await judge_messages(context, client, record, api_key, messages, user, chat_title, source=source)
     if judged is None:
         return
-    verdict, spam = judged
-    source = "新成员首条消息"
+    verdict, spam = judged.verdict, judged.spam
     if verdict.outcome == "pass":
+        await report_debug(context, client, judged, record, user, chat_title, source, "放行", undo=False)
         return
     if verdict.outcome == "log":
         text = log_text(verdict, chat_title, chat_id, user, spam.text, "未处置(可疑)", source)
         await send_log(context, text, plain=True)
+        await report_debug(context, client, judged, record, user, chat_title, source, "可疑，仅记录", undo=False)
         return
-    await enforce(context, client, record, messages, user, verdict, spam, chat_title, source)
+    label = await enforce(context, client, record, messages, user, verdict, spam, chat_title, source)
     action = context.antispam.group_config(record).action
+    await report_debug(
+        context, client, judged, record, user, chat_title, source, label, undo=action != AntispamAction.DELETE
+    )
     try:
         notice = await client.send_message(
             chat_id,
@@ -356,20 +439,23 @@ async def check_first_message(context: AppContext, client: Client, message: Mess
         logger.exception("failed to send antispam notice", extra={"chat_id": chat_id})
 
 
-async def undo_callback(_context: AppContext, client: Client, query: CallbackQuery) -> None:
+async def undo_callback(context: AppContext, client: Client, query: CallbackQuery) -> None:
     message = query.message
     if message is None or message.chat is None or message.chat.id is None:
         return
-    chat_id = message.chat.id
+    # 群内按钮只带用户 ID；debug 频道里的按钮额外带群 ID
+    user_text, _, chat_text = str(query.data).removeprefix(UNDO_PREFIX).partition(":")
     try:
-        user_id = int(str(query.data).removeprefix(UNDO_PREFIX))
+        user_id = int(user_text)
+        chat_id = int(chat_text) if chat_text else message.chat.id
     except ValueError:
         return
     try:
         rights = await fetch_member_rights(client, chat_id, query.from_user.id)
     except ChatUnavailable, RPCError:
         rights = None
-    if rights is None or not rights.can_restrict_members:
+    allowed = is_bot_admin(context, query.from_user.id) or (rights is not None and rights.can_restrict_members)
+    if not allowed:
         await client.answer_callback_query(query.id, "只有能限制成员的管理员可以恢复")
         return
     try:
@@ -383,7 +469,7 @@ async def undo_callback(_context: AppContext, client: Client, query: CallbackQue
         logger.info("antispam undo partially applied", extra={"chat_id": chat_id, "user_id": user_id})
     try:
         await client.edit_message_text(
-            chat_id,
+            message.chat.id,
             message.id,
             f"已由 {display_name(query.from_user)} 标记为误判并恢复。被删除的消息无法找回。",
             parse_mode=ParseMode.DISABLED,
