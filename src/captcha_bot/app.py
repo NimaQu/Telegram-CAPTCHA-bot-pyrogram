@@ -23,6 +23,7 @@ from captcha_bot.handlers import (
     register_antispam_handlers,
     register_challenge_handlers,
     register_config_handlers,
+    register_report_handlers,
 )
 from captcha_bot.jev import JevClient
 from captcha_bot.miniapp import register_miniapp_routes
@@ -87,6 +88,7 @@ def create_app(config_path: str | Path = "config.toml") -> FastAPI:
             register_challenge_handlers(client, context)
             register_config_handlers(client, context)
             register_antispam_handlers(client, context)
+            register_report_handlers(client, context)
             app.state.context = context
             await client.start()
             await sync_bot_commands(client, initial_settings.bot.admin_ids)

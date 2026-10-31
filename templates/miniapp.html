@@ -127,8 +127,13 @@
                         <span>每日调用上限</span>
                         <input name="daily_limit" type="number" min="1" max="100000" step="1" required>
                     </label>
+                    <label class="row">
+                        <span>举报所需票数</span>
+                        <input name="report_votes" type="number" min="0" max="20" step="1" required>
+                    </label>
                 </section>
                 <p class="hint">概率达到处置阈值就执行处置动作；介于记录阈值和处置阈值之间的只发到日志频道，不处置。</p>
+                <p class="hint">群成员回复一条消息发送 /report 发起举报，同意人数达到举报所需票数后交给 AI 判断；管理员同意会立即送检。填 0 关闭举报。</p>
 
                 <h2>本群补充规则</h2>
                 <section class="group stack">

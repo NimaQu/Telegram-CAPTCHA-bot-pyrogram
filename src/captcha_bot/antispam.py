@@ -135,6 +135,8 @@ class AntispamConfigModel(StrictPayload):
     log_threshold: int = Field(default=50, ge=0, le=100, strict=True)
     daily_limit: int = Field(default=500, ge=1, le=100_000, strict=True)
     rules: str = Field(default="", max_length=300)
+    # 举报需要多少人同意才交给 jev；0 表示关闭 /report
+    report_votes: int = Field(default=3, ge=0, le=20, strict=True)
 
     @field_validator("builtin")
     @classmethod
@@ -170,6 +172,7 @@ class AntispamConfigModel(StrictPayload):
                 log_threshold=record.log_threshold,
                 daily_limit=record.daily_limit,
                 rules=record.rules,
+                report_votes=record.report_votes,
             )
         except ValueError, ValidationError, AttributeError:
             logger.exception("invalid stored antispam config, using defaults", extra={"chat_id": record.chat_id})
@@ -187,6 +190,7 @@ class AntispamConfigModel(StrictPayload):
             log_threshold=self.log_threshold,
             daily_limit=self.daily_limit,
             rules=self.rules.strip(),
+            report_votes=self.report_votes,
         )
 
 
@@ -231,8 +235,21 @@ class SpamInput:
     images: tuple[Image, ...] = field(default_factory=tuple)
 
 
+def new_member_context(group_title: str) -> str:
+    return f"Telegram 群组「{group_title}」中一位刚通过入群验证的新成员发出的第一条消息"
+
+
+def report_context(group_title: str, votes: int) -> str:
+    return f"Telegram 群组「{group_title}」中被 {votes} 位成员举报为垃圾信息的一条消息，举报不一定正确"
+
+
 def build_request(
-    spam: SpamInput, config: AntispamConfigModel, group_title: str, *, with_images: bool
+    spam: SpamInput,
+    config: AntispamConfigModel,
+    group_title: str,
+    *,
+    with_images: bool,
+    context: str | None = None,
 ) -> tuple[dict[str, object], list[Question], dict[str, Image]]:
     assets: dict[str, Image] = {}
     message: dict[str, object] = {"text": spam.text[:MAX_TEXT_LENGTH]}
@@ -257,7 +274,7 @@ def build_request(
         if names:
             message["images"] = names
     state: dict[str, object] = {
-        "context": f"Telegram 群组「{group_title}」中一位刚通过入群验证的新成员发出的第一条消息",
+        "context": context or new_member_context(group_title),
         "sender": sender,
         "message": message,
     }
@@ -313,6 +330,16 @@ def judge(config: AntispamConfigModel, result: JevResult, *, images_sent: bool) 
     return Verdict(scores, hits, suspect, result.input_tokens, images_sent)
 
 
+@dataclass(slots=True)
+class ReportVote:
+    chat_id: int
+    message_id: int
+    target_user_id: int
+    poll_message_id: int
+    voters: set[int]
+    judging: bool = False
+
+
 class KeyCipher:
     def __init__(self, secret: str) -> None:
         digest = hashlib.sha256(f"captcha-bot antispam:{secret}".encode()).digest()
@@ -338,6 +365,8 @@ class AntispamService:
         self.repository = repository
         self.jev = jev
         self._test_calls: dict[int, list[datetime]] = {}
+        # 进行中的举报投票，键为 (群 ID, 被举报消息 ID)；重启后丢失，不影响已处置的结果
+        self.reports: dict[tuple[int, int], ReportVote] = {}
 
     @property
     def settings(self) -> AntispamSettings:
@@ -379,9 +408,17 @@ class AntispamService:
         """保存或开启前用最小请求验证 token；失败时抛出 JevError。"""
         await self.jev.evaluate(api_key, "ping", [Question("ok", "这是一条测试消息吗？", "是", "不是")])
 
-    async def evaluate(self, api_key: str, config: AntispamConfigModel, spam: SpamInput, group_title: str) -> Verdict:
+    async def evaluate(
+        self,
+        api_key: str,
+        config: AntispamConfigModel,
+        spam: SpamInput,
+        group_title: str,
+        *,
+        context: str | None = None,
+    ) -> Verdict:
         with_images = self.settings.send_images and (spam.avatar is not None or bool(spam.images))
-        state, questions, assets = build_request(spam, config, group_title, with_images=with_images)
+        state, questions, assets = build_request(spam, config, group_title, with_images=with_images, context=context)
         if not questions:
             return Verdict((), (), False, 0, False)
         try:
@@ -391,7 +428,7 @@ class AntispamService:
                 raise
             # 图片输入是实验功能，被拒时退回纯文字再试一次
             logger.warning("jev rejected image request, retrying text only: %s", exc.describe())
-            state, questions, _ = build_request(spam, config, group_title, with_images=False)
+            state, questions, _ = build_request(spam, config, group_title, with_images=False, context=context)
             result = await self.jev.evaluate(api_key, state, questions)
             with_images = False
         return judge(config, result, images_sent=with_images)

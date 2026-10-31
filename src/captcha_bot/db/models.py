@@ -85,6 +85,7 @@ class AntispamConfig(Base):
         CheckConstraint("act_threshold BETWEEN 1 AND 100", name="ck_antispam_config_act_threshold"),
         CheckConstraint("log_threshold BETWEEN 0 AND 100", name="ck_antispam_config_log_threshold"),
         CheckConstraint("daily_limit > 0", name="ck_antispam_config_daily_limit"),
+        CheckConstraint("report_votes BETWEEN 0 AND 20", name="ck_antispam_config_report_votes"),
     )
 
     chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -105,6 +106,7 @@ class AntispamConfig(Base):
     log_threshold: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
     daily_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=500)
     rules: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    report_votes: Mapped[int] = mapped_column(Integer, nullable=False, default=3, server_default="3")
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 

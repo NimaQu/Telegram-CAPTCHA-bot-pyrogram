@@ -212,70 +212,91 @@ async def apply_action(client: Client, chat_id: int, user_id: int, action: Antis
         await client.ban_chat_member(chat_id, user_id)
 
 
-def log_text(verdict: Verdict, chat_title: str, chat_id: int, user: User, text: str, action: str) -> str:
+def log_text(verdict: Verdict, chat_title: str, chat_id: int, user: User, text: str, action: str, source: str) -> str:
     scores = "、".join(score.label for score in sorted(verdict.scores, key=lambda s: -s.percent)[:3]) or "无"
     tag = "#ANTISPAM" if verdict.hits else "#ANTISPAM_SUSPECT"
     content = text if len(text) <= LOG_TEXT_LIMIT else f"{text[:LOG_TEXT_LIMIT]}…"
     username = f" @{user.username}" if user.username else ""
     return (
-        f"{tag}\n群组: {chat_title} ({chat_id})\n用户: {display_name(user)}{username} ({user.id})\n"
+        f"{tag}\n来源: {source}\n群组: {chat_title} ({chat_id})\n"
+        f"用户: {display_name(user)}{username} ({user.id})\n"
         f"命中: {scores}\n处置: {action}\n图片: {'已送检' if verdict.images_sent else '无'}\n"
         f"内容: {content or '(无文字)'}"
     )
 
 
-async def check_first_message(context: AppContext, client: Client, message: Message) -> None:
-    antispam = context.antispam
-    user = message.from_user
-    if not antispam.available or user is None or user.is_bot or message.chat is None or message.chat.id is None:
-        return
-    chat_id = message.chat.id
-    if not await context.repository.pop_antispam_pending(chat_id, user.id, PENDING_MAX_AGE):
-        return
+async def prepare(context: AppContext, chat_id: int, chat_title: str) -> tuple[AntispamRecord, str] | None:
+    """取出已开启群的配置和解密后的 token；token 坏了或超过每日上限时返回 None。"""
     record = await context.repository.get_antispam(chat_id)
     if record is None or not record.enabled:
-        return
-    api_key = antispam.api_key(record)
-    chat_title = message.chat.title or str(chat_id)
+        return None
+    api_key = context.antispam.api_key(record)
     if api_key is None:
         await handle_failure(
             context, record, JevError(ErrorKind.KEY, "无法解密已保存的 token，可能更换了加密密钥"), chat_title
         )
-        return
+        return None
     today = date.today()
-    if await antispam.over_daily_limit(record, today):
+    if await context.antispam.over_daily_limit(record, today):
         if await context.repository.mark_antispam_limit_notified(chat_id, today):
             await notify_setter(
                 context,
                 record,
                 f"群「{chat_title}」今天的 AI 反垃圾调用已达上限 {record.daily_limit} 次，"
-                "今天剩下的新成员不再检测，明天自动恢复。可以在配置面板中调高上限。",
+                "今天剩下的消息不再检测，明天自动恢复。可以在配置面板中调高上限。",
             )
-        return
+        return None
+    return record, api_key
 
-    messages = [message]
-    if message.media_group_id:
-        try:
-            messages = await client.get_media_group(chat_id, message.id)
-        except RPCError:
-            logger.info("failed to load media group", extra={"chat_id": chat_id})
-    spam = await collect_input(client, messages, user, with_images=antispam.settings.send_images)
-    config = antispam.group_config(record)
+
+async def media_group(client: Client, message: Message) -> list[Message]:
+    if not message.media_group_id or message.chat is None or message.chat.id is None:
+        return [message]
     try:
-        verdict = await antispam.evaluate(api_key, config, spam, chat_title)
+        return await client.get_media_group(message.chat.id, message.id)
+    except RPCError:
+        logger.info("failed to load media group", extra={"chat_id": message.chat.id})
+        return [message]
+
+
+async def judge_messages(
+    context: AppContext,
+    client: Client,
+    record: AntispamRecord,
+    api_key: str,
+    messages: list[Message],
+    user: User,
+    chat_title: str,
+    *,
+    jev_context: str | None = None,
+) -> tuple[Verdict, SpamInput] | None:
+    """送 jev 判断并记账；失败时按规则计数或自动关闭，返回 None。"""
+    antispam = context.antispam
+    spam = await collect_input(client, messages, user, with_images=antispam.settings.send_images)
+    try:
+        verdict = await antispam.evaluate(api_key, antispam.group_config(record), spam, chat_title, context=jev_context)
     except JevError as exc:
         await handle_failure(context, record, exc, chat_title)
-        return
-    await context.repository.add_antispam_usage(chat_id, today, verdict.input_tokens)
-    await context.repository.reset_antispam_failures(chat_id)
+        return None
+    await context.repository.add_antispam_usage(record.chat_id, date.today(), verdict.input_tokens)
+    await context.repository.reset_antispam_failures(record.chat_id)
+    return verdict, spam
 
-    if verdict.outcome == "pass":
-        return
-    if verdict.outcome == "log":
-        await send_log(context, log_text(verdict, chat_title, chat_id, user, spam.text, "未处置(可疑)"), plain=True)
-        return
 
-    action = config.action
+async def enforce(
+    context: AppContext,
+    client: Client,
+    record: AntispamRecord,
+    messages: list[Message],
+    user: User,
+    verdict: Verdict,
+    spam: SpamInput,
+    chat_title: str,
+    source: str,
+) -> str:
+    """删除消息并执行处置动作，写日志频道，返回实际执行情况的描述。"""
+    chat_id = record.chat_id
+    action = context.antispam.group_config(record).action
     label = ACTION_LABELS[action]
     try:
         await client.delete_messages(chat_id, [item.id for item in messages])
@@ -288,13 +309,45 @@ async def check_first_message(context: AppContext, client: Client, message: Mess
     except RPCError:
         logger.exception("failed to apply antispam action", extra={"chat_id": chat_id})
         label += "，处置失败"
-    await send_log(context, log_text(verdict, chat_title, chat_id, user, spam.text, label), plain=True)
+    await send_log(context, log_text(verdict, chat_title, chat_id, user, spam.text, label, source), plain=True)
+    return label
+
+
+def reason_text(verdict: Verdict) -> str:
     top = verdict.top
-    reason = top.classifier.name if top else "垃圾信息"
+    return top.label if top else "垃圾信息"
+
+
+async def check_first_message(context: AppContext, client: Client, message: Message) -> None:
+    user = message.from_user
+    if not context.antispam.available or user is None or user.is_bot or message.chat is None:
+        return
+    chat_id = message.chat.id
+    if chat_id is None or not await context.repository.pop_antispam_pending(chat_id, user.id, PENDING_MAX_AGE):
+        return
+    chat_title = message.chat.title or str(chat_id)
+    prepared = await prepare(context, chat_id, chat_title)
+    if prepared is None:
+        return
+    record, api_key = prepared
+    messages = await media_group(client, message)
+    judged = await judge_messages(context, client, record, api_key, messages, user, chat_title)
+    if judged is None:
+        return
+    verdict, spam = judged
+    source = "新成员首条消息"
+    if verdict.outcome == "pass":
+        return
+    if verdict.outcome == "log":
+        text = log_text(verdict, chat_title, chat_id, user, spam.text, "未处置(可疑)", source)
+        await send_log(context, text, plain=True)
+        return
+    await enforce(context, client, record, messages, user, verdict, spam, chat_title, source)
+    action = context.antispam.group_config(record).action
     try:
         notice = await client.send_message(
             chat_id,
-            f"已移除 {display_name(user)} 的疑似垃圾消息(原因：{reason})。",
+            f"已移除 {display_name(user)} 的疑似垃圾消息(原因：{reason_text(verdict)})。",
             parse_mode=ParseMode.DISABLED,
             reply_markup=undo_keyboard(user.id) if action != AntispamAction.DELETE else None,
         )
@@ -341,7 +394,9 @@ async def undo_callback(_context: AppContext, client: Client, query: CallbackQue
 
 
 def register_antispam_handlers(client: Client, context: AppContext) -> None:
-    client.add_handler(MessageHandler(partial(check_first_message, context), filters.group & ~filters.service), group=2)
+    # /report 本身不算新成员的第一条消息
+    first_message = filters.group & ~filters.service & ~filters.command("report")
+    client.add_handler(MessageHandler(partial(check_first_message, context), first_message), group=2)
     # 放在 -1 组，先于验证题的回调路由处理
     client.add_handler(
         CallbackQueryHandler(partial(undo_callback, context), filters.regex(f"^{UNDO_PREFIX}")), group=-1

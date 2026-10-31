@@ -75,6 +75,7 @@ class AntispamRecord:
     log_threshold: int
     daily_limit: int
     rules: str
+    report_votes: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +86,7 @@ class AntispamRules:
     log_threshold: int
     daily_limit: int
     rules: str
+    report_votes: int = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -389,6 +391,7 @@ class Repository:
             log_threshold=row.log_threshold,
             daily_limit=row.daily_limit,
             rules=row.rules,
+            report_votes=row.report_votes,
         )
 
     async def get_antispam(self, chat_id: int) -> AntispamRecord | None:
@@ -407,6 +410,7 @@ class Repository:
             log_threshold=defaults.log_threshold,
             daily_limit=defaults.daily_limit,
             rules=defaults.rules,
+            report_votes=defaults.report_votes,
         )
         await session.execute(statement.on_conflict_do_nothing(index_elements=[AntispamConfig.chat_id]))
 
@@ -423,6 +427,7 @@ class Repository:
                     log_threshold=rules.log_threshold,
                     daily_limit=rules.daily_limit,
                     rules=rules.rules,
+                    report_votes=rules.report_votes,
                     updated_at=datetime.now(),
                 )
             )

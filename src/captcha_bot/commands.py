@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 GROUP_COMMANDS = [
     BotCommand("config", "群管理员打开群组配置面板"),
+    BotCommand("report", "回复一条消息举报垃圾信息"),
     BotCommand("help", "机器人介绍"),
 ]
 

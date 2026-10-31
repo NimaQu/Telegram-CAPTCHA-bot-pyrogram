@@ -122,6 +122,7 @@ def record_for(config: AntispamConfigModel, **values: Any) -> AntispamRecord:
         "log_threshold": rules.log_threshold,
         "daily_limit": rules.daily_limit,
         "rules": rules.rules,
+        "report_votes": rules.report_votes,
     }
     return AntispamRecord(**(base | values))
 

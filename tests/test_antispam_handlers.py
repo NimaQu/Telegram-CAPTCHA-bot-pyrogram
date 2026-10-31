@@ -24,11 +24,12 @@ from pyrogram.errors import ChatAdminRequired, MessageDeleteForbidden, UserIsBlo
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from captcha_bot.antispam import AntispamConfigModel, AntispamService
+from captcha_bot.antispam import AntispamConfigModel, AntispamService, ReportVote
 from captcha_bot.config import ConfigStore, Settings
 from captcha_bot.db.models import Base
 from captcha_bot.db.repository import Repository
 from captcha_bot.handlers import antispam as handlers
+from captcha_bot.handlers import report
 from captcha_bot.jev import JevClient
 from captcha_bot.miniapp import register_miniapp_routes
 from captcha_bot.miniapp_antispam import router as antispam_router
@@ -451,3 +452,160 @@ async def test_miniapp_requires_rights_and_configuration(env: SimpleNamespace, s
         assert not state["available"]
         unavailable = await client.put(f"{base}/key", headers=auth(), json={"api_key": "sk-secret-9876"})
         assert unavailable.status_code == 503
+
+
+# ---- /report ----
+
+
+def rights_by_user(admins: set[int]) -> Any:
+    async def get_chat_member(_chat_id: int, user_id: int) -> Any:
+        return member(ChatMemberStatus.OWNER if user_id in admins else ChatMemberStatus.MEMBER)
+
+    return get_chat_member
+
+
+def report_message(reporter: int, target: Any | None) -> Any:
+    reply = SimpleNamespace(id=55, delete=AsyncMock())
+    return SimpleNamespace(
+        chat=SimpleNamespace(id=CHAT_ID, title="My group"),
+        from_user=user(reporter, first_name=f"U{reporter}", last_name=None),
+        reply_to_message=target,
+        delete=AsyncMock(),
+        reply=AsyncMock(return_value=reply),
+    )
+
+
+def vote_query(voter: int, message_id: int = 10) -> Any:
+    return SimpleNamespace(
+        id=f"q{voter}",
+        data=f"as:vote:{message_id}",
+        from_user=SimpleNamespace(id=voter, first_name="V", last_name=None),
+        message=SimpleNamespace(id=900, chat=SimpleNamespace(id=CHAT_ID, title="My group")),
+    )
+
+
+@pytest.fixture
+def report_env(env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    monkeypatch.setattr(report, "schedule", lambda coroutine, **_kwargs: coroutine.close())
+    env.client.get_chat_member = AsyncMock(side_effect=rights_by_user({1}))
+    env.client.edit_message_reply_markup = AsyncMock()
+    env.client.get_messages = AsyncMock(return_value=message(empty=False))
+    return env
+
+
+@pytest.mark.asyncio
+async def test_report_votes_then_jev_removes_spam(report_env: SimpleNamespace) -> None:
+    env = report_env
+    await enable(env, report_votes=3)
+    command = report_message(20, message(empty=False))
+    await report.report_command(env.context, env.client, command)
+
+    command.delete.assert_awaited_once()
+    poll = env.client.send_message.await_args
+    assert poll.kwargs["reply_to_message_id"] == 10
+    assert "(1/3)" in poll.kwargs["reply_markup"].inline_keyboard[0][0].text
+
+    await report.vote_callback(env.context, env.client, vote_query(20))
+    assert env.client.answer_callback_query.await_args.args[1] == "你已经投过票了"
+    await report.vote_callback(env.context, env.client, vote_query(7))
+    assert "自己" in env.client.answer_callback_query.await_args.args[1]
+    await report.vote_callback(env.context, env.client, vote_query(21))
+    markup = env.client.edit_message_reply_markup.await_args.kwargs["reply_markup"]
+    assert "(2/3)" in markup.inline_keyboard[0][0].text
+    assert env.fake.requests == []
+
+    env.fake.responses.append(answers(ad=0.95))
+    await report.vote_callback(env.context, env.client, vote_query(22))
+
+    assert "被 3 位成员举报" in env.fake.requests[0]["state"]["context"]
+    env.client.delete_messages.assert_any_await(CHAT_ID, [10])
+    env.client.restrict_chat_member.assert_awaited_once()
+    final = env.client.edit_message_text.await_args
+    assert "AI 判定" in final.args[2] and "广告引流 95%" in final.args[2]
+    assert final.kwargs["reply_markup"].inline_keyboard[0][0].callback_data == "as:undo:7"
+    log = next(call for call in env.client.send_message.await_args_list if call.args[0] != CHAT_ID)
+    assert "来源: 举报(3 人)" in log.args[1]
+    assert env.service.reports == {}
+
+    await report.vote_callback(env.context, env.client, vote_query(23))
+    assert env.client.answer_callback_query.await_args.args[1] == "这次举报已经结束了"
+
+
+@pytest.mark.asyncio
+async def test_admin_report_is_judged_immediately(report_env: SimpleNamespace) -> None:
+    env = report_env
+    await enable(env, report_votes=5)
+    env.fake.responses.append(answers(ad=0.1))
+    await report.report_command(env.context, env.client, report_message(1, message(empty=False)))
+    assert len(env.fake.requests) == 1
+    assert "不是垃圾信息" in env.client.edit_message_text.await_args.args[2]
+    env.client.delete_messages.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_admin_vote_and_suspect_result(report_env: SimpleNamespace) -> None:
+    env = report_env
+    await enable(env, report_votes=5)
+    await report.report_command(env.context, env.client, report_message(20, message(empty=False)))
+    env.fake.responses.append(answers(ad=0.6))
+    await report.vote_callback(env.context, env.client, vote_query(1))
+    assert "不能确定" in env.client.edit_message_text.await_args.args[2]
+    assert any("#ANTISPAM_SUSPECT" in str(call.args[1]) for call in env.client.send_message.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_report_second_reporter_adds_vote_and_failures(report_env: SimpleNamespace) -> None:
+    env = report_env
+    await enable(env, report_votes=2)
+    await report.report_command(env.context, env.client, report_message(20, message(empty=False)))
+    env.fake.responses.append(httpx.Response(500, text="boom"))
+    await report.report_command(env.context, env.client, report_message(21, message(empty=False)))
+    assert "暂时无法判断" in env.client.edit_message_text.await_args.args[2]
+
+    env.client.get_messages.return_value = SimpleNamespace(empty=True, from_user=None)
+    await report.report_command(env.context, env.client, report_message(20, message(empty=False)))
+    await report.report_command(env.context, env.client, report_message(21, message(empty=False)))
+    assert "不存在" in env.client.edit_message_text.await_args.args[2]
+
+
+@pytest.mark.asyncio
+async def test_report_rejections(report_env: SimpleNamespace) -> None:
+    env = report_env
+
+    async def hint_of(reporter: int, target: Any | None) -> str:
+        command = report_message(reporter, target)
+        await report.report_command(env.context, env.client, command)
+        command.delete.assert_awaited_once()
+        return command.reply.await_args.args[0]
+
+    assert "没有开启" in await hint_of(20, message(empty=False))
+    await enable(env, report_votes=0)
+    assert "没有开启" in await hint_of(20, message(empty=False))
+    await enable(env, report_votes=3)
+    assert "请回复" in await hint_of(20, None)
+    assert "不能被举报" in await hint_of(20, message(empty=False, from_user=user(1)))
+    assert "不能被举报" in await hint_of(20, message(empty=False, from_user=user(30, is_bot=True)))
+    assert "自己" in await hint_of(7, message(empty=False))
+    env.client.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_report_when_feature_unavailable_mid_vote(report_env: SimpleNamespace) -> None:
+    env = report_env
+    await enable(env, report_votes=2)
+    await report.report_command(env.context, env.client, report_message(20, message(empty=False)))
+    await env.repository.set_antispam_enabled(CHAT_ID, False)
+    await report.vote_callback(env.context, env.client, vote_query(21))
+    assert "暂时不可用" in env.client.edit_message_text.await_args.args[2]
+
+
+@pytest.mark.asyncio
+async def test_report_poll_expires(report_env: SimpleNamespace) -> None:
+    env = report_env
+    vote = ReportVote(CHAT_ID, 10, 7, 900, {20})
+    env.service.reports[(CHAT_ID, 10)] = vote
+    await report._expire(env.context, env.client, vote)
+    env.client.delete_messages.assert_awaited_once_with(CHAT_ID, 900)
+    assert env.service.reports == {}
+    await report._expire(env.context, env.client, vote)
+    env.client.delete_messages.assert_awaited_once()

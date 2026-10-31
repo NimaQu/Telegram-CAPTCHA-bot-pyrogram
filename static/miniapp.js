@@ -257,6 +257,7 @@
             form.elements.act_threshold.value = config.act_threshold;
             form.elements.log_threshold.value = config.log_threshold;
             form.elements.daily_limit.value = config.daily_limit;
+            form.elements.report_votes.value = config.report_votes;
             form.elements.rules.value = config.rules;
             const usage = state.usage;
             document.getElementById("antispam-usage").textContent =
@@ -285,6 +286,7 @@
                 act_threshold: Number(form.elements.act_threshold.value),
                 log_threshold: Number(form.elements.log_threshold.value),
                 daily_limit: Number(form.elements.daily_limit.value),
+                report_votes: Number(form.elements.report_votes.value),
                 rules: form.elements.rules.value.trim(),
             };
         }
