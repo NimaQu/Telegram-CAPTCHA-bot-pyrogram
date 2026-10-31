@@ -9,7 +9,7 @@ import pytest
 from pyrogram import Client
 from pyrogram.enums import ChatMemberStatus, ChatType
 from pyrogram.errors import ChannelPrivate
-from pyrogram.types import ChatJoinRequest, User
+from pyrogram.types import ChatJoinRequest, MessageOriginHiddenUser, MessageOriginUser, User
 
 from captcha_bot.challenges import ChallengeKind, ChallengeRegistry, ChallengeSession
 from captcha_bot.config import ChallengeType, Settings
@@ -69,7 +69,7 @@ def message_for(
         chat=SimpleNamespace(id=chat_id, title="group"),
         text=text,
         command=command,
-        forward_from=None,
+        forward_origin=None,
         service=None,
         reply=AsyncMock(return_value=reply),
         delete=AsyncMock(),
@@ -175,8 +175,11 @@ async def test_admin_log_ip_sender_and_forward_commands(settings: Settings) -> N
 
     forwarded = message_for()
     await admin.forwarded_user_record(context, context.client, forwarded)
+    assert "匿名身份" in forwarded.reply.await_args.args[0]
+    forwarded.forward_origin = MessageOriginHiddenUser(sender_user_name="hidden")
+    await admin.forwarded_user_record(context, context.client, forwarded)
     assert "关闭了消息转发权限" in forwarded.reply.await_args.args[0]
-    forwarded.forward_from = SimpleNamespace(id=42)
+    forwarded.forward_origin = MessageOriginUser(sender_user=cast(User, SimpleNamespace(id=42)))
     context.repository.logs_by_user.return_value = ["forwarded-record"]
     await admin.forwarded_user_record(context, context.client, forwarded)
     assert forwarded.reply.await_args.args[0] == "forwarded-record"

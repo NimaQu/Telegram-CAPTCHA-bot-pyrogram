@@ -9,7 +9,7 @@ from pyrogram.enums import ChatMemberStatus
 from pyrogram.enums.chat_members_filter import ChatMembersFilter
 from pyrogram.errors import BadRequest, ChatAdminRequired, RPCError
 from pyrogram.handlers import MessageHandler
-from pyrogram.types import Message
+from pyrogram.types import LinkPreviewOptions, Message, MessageOriginHiddenUser, MessageOriginUser
 
 from captcha_bot import admin_ops
 from captcha_bot.context import AppContext
@@ -25,6 +25,8 @@ from captcha_bot.handlers.common import (
 )
 
 logger = logging.getLogger(__name__)
+
+NO_LINK_PREVIEW = LinkPreviewOptions(is_disabled=True)
 
 
 async def reload_config(context: AppContext, _client: Client, message: Message) -> None:
@@ -50,7 +52,7 @@ async def help_command(context: AppContext, client: Client, message: Message) ->
             schedule(reply.delete(), delay=3, name=f"delete-help-reply:{reply.id}")
             schedule(message.delete(), delay=3, name=f"delete-help-command:{message.id}")
             return
-    await message.reply(context.config.settings.messages.self_introduction, disable_web_page_preview=True)
+    await message.reply(context.config.settings.messages.self_introduction, link_preview_options=NO_LINK_PREVIEW)
 
 
 async def ping_command(_context: AppContext, _client: Client, message: Message) -> None:
@@ -201,7 +203,7 @@ async def get_user_by_ip(context: AppContext, client: Client, message: Message) 
         )
         text += "\n"
     for chunk in split_long_message(text):
-        await message.reply(chunk, disable_web_page_preview=True)
+        await message.reply(chunk, link_preview_options=NO_LINK_PREVIEW)
 
 
 async def ban_user_by_ip(context: AppContext, client: Client, message: Message) -> None:
@@ -237,10 +239,14 @@ async def ban_user_by_ip(context: AppContext, client: Client, message: Message) 
 async def forwarded_user_record(context: AppContext, _client: Client, message: Message) -> None:
     if message.from_user is None or not is_bot_admin(context, message.from_user.id):
         return
-    if message.forward_from is None:
-        await message.reply("该消息用户为频道或关闭了消息转发权限")
+    origin = message.forward_origin
+    if isinstance(origin, MessageOriginHiddenUser):
+        await message.reply("该用户关闭了消息转发权限，无法获取用户 ID")
         return
-    logs = await context.repository.logs_by_user(message.forward_from.id)
+    if not isinstance(origin, MessageOriginUser) or origin.sender_user is None:
+        await message.reply("该消息来自频道或群组的匿名身份，无法查询")
+        return
+    logs = await context.repository.logs_by_user(origin.sender_user.id)
     await message.reply("\n".join(map(str, logs)) if logs else "没有找到相关记录")
 
 
