@@ -31,3 +31,7 @@ venv
 .coverage
 htmlcov/
 .uv-cache/
+
+# IP location database
+qqwry.dat
+.qqwry.dat.download

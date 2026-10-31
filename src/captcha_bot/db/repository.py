@@ -43,8 +43,11 @@ class LogRecord:
     action: str
     created_at: datetime | None
 
+    def format(self, ip_text: str) -> str:
+        return f"IP地址: {ip_text}\nUA：`{self.user_agent}`\n状态：`{self.action}`\n时间：`{self.created_at}`\n"
+
     def __str__(self) -> str:
-        return f"IP地址: `{self.ip_addr}`\nUA：`{self.user_agent}`\n状态：`{self.action}`\n时间：`{self.created_at}`\n"
+        return self.format(f"`{self.ip_addr}`")
 
 
 def async_database_url(url: str) -> str:

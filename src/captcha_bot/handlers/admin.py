@@ -13,6 +13,7 @@ from pyrogram.types import LinkPreviewOptions, Message, MessageOriginHiddenUser,
 
 from captcha_bot import admin_ops
 from captcha_bot.context import AppContext
+from captcha_bot.db.repository import LogRecord
 from captcha_bot.handlers.common import (
     ChatUnavailable,
     can_restrict_members,
@@ -27,6 +28,10 @@ from captcha_bot.handlers.common import (
 logger = logging.getLogger(__name__)
 
 NO_LINK_PREVIEW = LinkPreviewOptions(is_disabled=True)
+
+
+async def format_logs(context: AppContext, logs: list[LogRecord]) -> str:
+    return "\n".join([record.format(await context.geoip.format(record.ip_addr)) for record in logs])
 
 
 async def reload_config(context: AppContext, _client: Client, message: Message) -> None:
@@ -175,7 +180,7 @@ async def get_log(context: AppContext, _client: Client, message: Message) -> Non
         await message.reply("使用方法: /getlog [challenge_id]")
         return
     logs = await context.repository.logs_by_challenge(message.command[1])
-    await message.reply("\n".join(map(str, logs)) if logs else "没有找到相关记录")
+    await message.reply(await format_logs(context, logs) if logs else "没有找到相关记录")
 
 
 async def get_user_by_ip(context: AppContext, client: Client, message: Message) -> None:
@@ -194,7 +199,8 @@ async def get_user_by_ip(context: AppContext, client: Client, message: Message) 
         return
     records = sum(len(group.users) for group in groups)
     unique_users = len({user_id for group in groups for user_id, _ in group.users})
-    text = f"IP `{ip_addr}` 通过验证的用户共 {unique_users} 个，用户/群记录 {records} 条，涉及 {len(groups)} 个群:\n\n"
+    ip_text = await context.geoip.format(ip_addr)
+    text = f"IP {ip_text} 通过验证的用户共 {unique_users} 个，用户/群记录 {records} 条，涉及 {len(groups)} 个群:\n\n"
     for group in groups:
         text += f"群组: {group.title} (`{group.group_id}`)\n"
         text += "".join(
@@ -229,7 +235,8 @@ async def ban_user_by_ip(context: AppContext, client: Client, message: Message) 
     if result is None:
         await message.reply("没有找到在该群通过这个 IP 验证的用户")
         return
-    text = f"封禁完成: 成功 {result.success} 个，失败 {len(result.failures)} 个。"
+    ip_text = await context.geoip.format(ip_addr)
+    text = f"IP {ip_text}\n封禁完成: 成功 {result.success} 个，失败 {len(result.failures)} 个。"
     if result.failures:
         text += "\n\n失败列表:\n" + "".join(f"- `{user_id}`: `{error}`\n" for user_id, error in result.failures)
     for chunk in split_long_message(text):
@@ -247,7 +254,7 @@ async def forwarded_user_record(context: AppContext, _client: Client, message: M
         await message.reply("该消息来自频道或群组的匿名身份，无法查询")
         return
     logs = await context.repository.logs_by_user(origin.sender_user.id)
-    await message.reply("\n".join(map(str, logs)) if logs else "没有找到相关记录")
+    await message.reply(await format_logs(context, logs) if logs else "没有找到相关记录")
 
 
 def register_admin_handlers(client: Client, context: AppContext) -> None:

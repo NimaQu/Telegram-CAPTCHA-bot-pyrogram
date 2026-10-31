@@ -118,6 +118,28 @@ Telegram 中的 `/reload` 会先完整校验 TOML。仅 `[defaults]` 与 `[messa
 
 管理员从群配置入口打开 Mini App 时，页面顶部也会出现「Bot 管理」标签页。所有管理接口都会校验 initData，并检查用户是否在 `admin_ids` 中。
 
+## IP 归属地
+
+Bot 输出 IP 时（`/getlog`、`/getuserbyip`、`/banuserbyip`、转发消息查询以及 Mini App 管理面板）会附带归属地，IP 用 inline code 包裹，在 Telegram 里点一下即可复制，例如：
+
+```text
+IP地址: `114.114.114.114` (中国–江苏–南京 南京信风网络科技有限公司GreatbitDNS服务器)
+```
+
+归属地数据暂时使用 [metowolf/qqwry.dat](https://github.com/metowolf/qqwry.dat/releases) 发布的纯真 IP 库，仅支持 IPv4；IPv6 或查不到时只显示 IP。下载/更新：
+
+```bash
+uv run captcha-bot update-qqwry --config config.toml
+```
+
+命令会下载 `[geoip].download_url`（默认最新 release），校验文件格式后原子替换 `[geoip].qqwry_path`（默认工作目录下的 `qqwry.dat`）。运行中的机器人会检测到文件变化并在下次查询时自动重新加载，无需重启。上游大约每周更新，可以用 cron 或 systemd timer 定期执行上述命令，例如：
+
+```cron
+0 5 * * 3 cd /opt/captcha-bot && uv run captcha-bot update-qqwry --config config.toml
+```
+
+文件不存在或 `qqwry_path` 留空时，归属地功能自动关闭，其他功能不受影响。
+
 ## 命令菜单
 
 Bot 启动时会自动设置命令菜单，无需在 BotFather 中 `/setcommands`：群聊显示 `/config`、`/help`，私聊显示 `/config`、`/sender`；`admin_ids` 中的管理员在与 Bot 的私聊里额外看到 `/admin`、`/getlog`、`/getuserbyip`、`/banuserbyip`、`/leave`、`/reload`、`/clean`、`/ping`。管理员需要先私聊过 Bot，否则无法为其设置专属菜单（日志中会有警告，私聊 Bot 后重启即可）。

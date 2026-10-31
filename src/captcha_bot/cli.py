@@ -9,6 +9,7 @@ from collections.abc import Coroutine
 from pathlib import Path
 from typing import Any
 
+import httpx
 import uvicorn
 from alembic.config import Config
 from alembic.util.exc import CommandError
@@ -20,6 +21,7 @@ from captcha_bot.config import load_settings, migrate_legacy_config
 from captcha_bot.db.importer import import_csv
 from captcha_bot.db.legacy import migrate_database
 from captcha_bot.db.repository import Database, Repository
+from captcha_bot.geoip import download_qqwry
 
 
 def parser() -> argparse.ArgumentParser:
@@ -45,6 +47,8 @@ def parser() -> argparse.ArgumentParser:
     importer.add_argument("file", type=Path)
     importer.add_argument("--table", required=True, choices=("group-config", "blacklist-user"))
     importer.add_argument("--config", default="config.toml", type=Path)
+    qqwry = subcommands.add_parser("update-qqwry", help="download or update the qqwry.dat IP location database")
+    qqwry.add_argument("--config", default="config.toml", type=Path)
     return command_parser
 
 
@@ -113,6 +117,13 @@ def main(default_command: str | None = None) -> None:
             count = _run_async(_import_command(args.config, args.file, args.table))
             print(f"已导入 {count} 条记录")
             return
+        if args.command == "update-qqwry":
+            geoip = load_settings(args.config).geoip
+            if not geoip.qqwry_path:
+                raise ValueError("geoip.qqwry_path 未设置")
+            version = _run_async(download_qqwry(geoip.download_url, geoip.qqwry_path))
+            print(f"已更新 {geoip.qqwry_path}：{version}；运行中的机器人会自动加载新文件")
+            return
         if args.command == "run":
             from captcha_bot.app import create_app
 
@@ -130,5 +141,5 @@ def main(default_command: str | None = None) -> None:
             )
             return
         parser().print_help()
-    except (OSError, ValueError, ValidationError, RuntimeError, CommandError, SQLAlchemyError) as exc:
+    except (OSError, ValueError, ValidationError, RuntimeError, CommandError, SQLAlchemyError, httpx.HTTPError) as exc:
         raise SystemExit(f"error: {exc}") from exc

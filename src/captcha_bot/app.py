@@ -16,6 +16,7 @@ from captcha_bot.commands import sync_bot_commands
 from captcha_bot.config import ConfigStore, load_settings
 from captcha_bot.context import AppContext
 from captcha_bot.db.repository import Database, Repository
+from captcha_bot.geoip import GeoIpService
 from captcha_bot.handlers import register_admin_handlers, register_challenge_handlers, register_config_handlers
 from captcha_bot.miniapp import register_miniapp_routes
 from captcha_bot.miniapp_admin import router as miniapp_admin_router
@@ -64,6 +65,7 @@ def create_app(config_path: str | Path = "config.toml") -> FastAPI:
                 policies=policies,
                 turnstile=TurnstileService(http, config),
                 client=client,
+                geoip=GeoIpService(lambda: config.settings.geoip.qqwry_path),
             )
             register_admin_handlers(client, context)
             register_challenge_handlers(client, context)

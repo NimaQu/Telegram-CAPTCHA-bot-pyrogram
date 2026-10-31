@@ -29,6 +29,11 @@ base_url = "https://example.com"
 verify_url = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 timeout_seconds = 10.0
 
+[geoip]
+# 纯真 IP 库路径，用 `captcha-bot update-qqwry` 下载/更新；留空或文件不存在时不显示归属地
+qqwry_path = "qqwry.dat"
+download_url = "https://github.com/metowolf/qqwry.dat/releases/latest/download/qqwry.dat"
+
 [defaults]
 challenge_timeout = 60
 challenge_timeout_action = "kick"

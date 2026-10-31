@@ -13,7 +13,7 @@ from pyrogram.types import ChatJoinRequest, MessageOriginHiddenUser, MessageOrig
 
 from captcha_bot.challenges import ChallengeKind, ChallengeRegistry, ChallengeSession
 from captcha_bot.config import ChallengeType, Settings
-from captcha_bot.db.repository import BlacklistRecord
+from captcha_bot.db.repository import BlacklistRecord, LogRecord
 from captcha_bot.handlers import admin, challenge
 from captcha_bot.handlers.common import MemberRights
 
@@ -51,6 +51,7 @@ def context_for(settings: Settings, *, policy: Any | None = None) -> Any:
         client=client,
         repository=repository,
         policies=SimpleNamespace(get=AsyncMock(return_value=policy or settings.defaults)),
+        geoip=SimpleNamespace(format=AsyncMock(side_effect=lambda ip: f"`{ip}` (测试归属地)")),
         registry=ChallengeRegistry(),
     )
 
@@ -153,9 +154,10 @@ async def test_admin_log_ip_sender_and_forward_commands(settings: Settings) -> N
     assert sender.reply.await_args.args[0] == "42"
 
     get_log = message_for(command=["getlog", "challenge"])
-    context.repository.logs_by_challenge.return_value = ["record"]
+    record = LogRecord(-1001, 42, "challenge", "1.2.3.4", "UA", "Passed", datetime(2026, 1, 1))
+    context.repository.logs_by_challenge.return_value = [record]
     await admin.get_log(context, context.client, get_log)
-    assert get_log.reply.await_args.args[0] == "record"
+    assert "IP地址: `1.2.3.4` (测试归属地)" in get_log.reply.await_args.args[0]
 
     invalid_ip = message_for(command=["getuserbyip", "bad"])
     await admin.get_user_by_ip(context, context.client, invalid_ip)
@@ -165,6 +167,7 @@ async def test_admin_log_ip_sender_and_forward_commands(settings: Settings) -> N
     by_ip = message_for(command=["getuserbyip", "127.0.0.1"])
     await admin.get_user_by_ip(context, context.client, by_ip)
     assert "用户共 2 个" in by_ip.reply.await_args.args[0]
+    assert "IP `127.0.0.1` (测试归属地)" in by_ip.reply.await_args.args[0]
 
     no_users = message_for(command=["banuserbyip", "127.0.0.1", "-1001"])
     await admin.ban_user_by_ip(context, context.client, no_users)
@@ -180,9 +183,9 @@ async def test_admin_log_ip_sender_and_forward_commands(settings: Settings) -> N
     await admin.forwarded_user_record(context, context.client, forwarded)
     assert "关闭了消息转发权限" in forwarded.reply.await_args.args[0]
     forwarded.forward_origin = MessageOriginUser(sender_user=cast(User, SimpleNamespace(id=42)))
-    context.repository.logs_by_user.return_value = ["forwarded-record"]
+    context.repository.logs_by_user.return_value = [record, record]
     await admin.forwarded_user_record(context, context.client, forwarded)
-    assert forwarded.reply.await_args.args[0] == "forwarded-record"
+    assert forwarded.reply.await_args.args[0].count("测试归属地") == 2
 
 
 @pytest.mark.asyncio

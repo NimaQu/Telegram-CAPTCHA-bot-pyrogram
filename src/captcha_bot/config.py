@@ -130,6 +130,17 @@ class TurnstileSettings(StrictModel):
         return str(TypeAdapter(AnyHttpUrl).validate_python(value)).rstrip("/")
 
 
+class GeoIpSettings(StrictModel):
+    # 留空则不显示 IP 归属地；相对路径以工作目录为准
+    qqwry_path: str | None = "qqwry.dat"
+    download_url: str = "https://github.com/metowolf/qqwry.dat/releases/latest/download/qqwry.dat"
+
+    @field_validator("download_url")
+    @classmethod
+    def validate_download_url(cls, value: str) -> str:
+        return str(TypeAdapter(AnyHttpUrl).validate_python(value))
+
+
 class DefaultPolicy(StrictModel):
     challenge_timeout: int = Field(default=60, gt=0, le=3600, strict=True)
     challenge_timeout_action: FailedAction = FailedAction.KICK
@@ -206,6 +217,7 @@ class Settings(StrictModel):
     web: WebSettings = WebSettings()
     proxy: ProxySettings = ProxySettings()
     turnstile: TurnstileSettings
+    geoip: GeoIpSettings = GeoIpSettings()
     defaults: DefaultPolicy = DefaultPolicy()
     messages: Messages
 

@@ -42,6 +42,7 @@ def admin_app(settings: Settings) -> tuple[FastAPI, Any]:
             get_users=AsyncMock(return_value=[SimpleNamespace(is_deleted=True)]),
             ban_chat_member=AsyncMock(),
         ),
+        geoip=SimpleNamespace(lookup=AsyncMock(return_value="中国 北京")),
         repository=SimpleNamespace(
             all_blacklist_user_ids=AsyncMock(return_value=[7]),
             remove_blacklist_users=AsyncMock(),
@@ -101,12 +102,15 @@ async def test_admin_logs_and_ip_lookup(settings: Settings) -> None:
         logs = await client.get("/miniapp/api/admin/logs?challenge_id=challenge", headers=headers(settings))
         assert logs.json()["logs"][0]["ip_addr"] == "1.2.3.4"
         assert logs.json()["logs"][0]["created_at"] == "2026-01-01T12:00:00"
+        assert logs.json()["logs"][0]["ip_location"] == "中国 北京"
         by_user = await client.get("/miniapp/api/admin/logs?user_id=7", headers=headers(settings))
         assert by_user.json() == {"logs": []}
         context.repository.logs_by_user.assert_awaited_once_with(7)
         assert (await client.get("/miniapp/api/admin/logs", headers=headers(settings))).status_code == 400
 
-        groups = (await client.get("/miniapp/api/admin/ip/1.2.3.4", headers=headers(settings))).json()["groups"]
+        lookup = (await client.get("/miniapp/api/admin/ip/1.2.3.4", headers=headers(settings))).json()
+        assert lookup["location"] == "中国 北京"
+        groups = lookup["groups"]
         assert groups == [
             {
                 "group_id": -1001,

@@ -133,7 +133,7 @@
             card.append(
                 element("p", `${log.action} · ${formatTime(log.created_at)}`),
                 element("p", `用户 ${log.user_id} · 群组 ${log.group_id}`, "meta"),
-                element("p", `IP: ${log.ip_addr}`, "meta"),
+                element("p", `IP: ${log.ip_addr}${log.ip_location ? ` (${log.ip_location})` : ""}`, "meta"),
                 element("p", `UA: ${log.user_agent}`, "meta"),
                 element("p", `验证 ID: ${log.challenge_id}`, "meta"),
             );
@@ -141,8 +141,9 @@
         }
     }
 
-    function renderIpGroups(container, ip, groups) {
+    function renderIpGroups(container, ip, location, groups) {
         container.replaceChildren();
+        if (location) container.append(element("p", `归属地: ${location}`, "meta"));
         if (groups.length === 0) {
             container.append(element("p", "没有找到通过该 IP 验证的用户", "meta"));
             return;
@@ -194,7 +195,7 @@
             const ip = ipForm.elements.ip.value.trim();
             run(ipForm.querySelector("button"), async () => {
                 const result = await api(`admin/ip/${encodeURIComponent(ip)}`, { method: "GET" });
-                renderIpGroups(document.getElementById("ip-results"), ip, result.groups);
+                renderIpGroups(document.getElementById("ip-results"), ip, result.location, result.groups);
                 status.hidden = true;
             });
         });

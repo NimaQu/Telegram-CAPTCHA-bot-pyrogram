@@ -51,12 +51,13 @@ def _checked_ip(ip_addr: str) -> str:
     return ip_addr
 
 
-def _log_json(record: LogRecord) -> dict[str, object]:
+def _log_json(record: LogRecord, location: str | None) -> dict[str, object]:
     return {
         "group_id": record.group_id,
         "user_id": record.user_id,
         "challenge_id": record.challenge_id,
         "ip_addr": record.ip_addr,
+        "ip_location": location,
         "user_agent": record.user_agent,
         "action": record.action,
         "created_at": record.created_at.isoformat() if record.created_at else None,
@@ -121,14 +122,18 @@ async def get_logs(
         logs = await repository.logs_by_user(user_id)
     else:
         raise HTTPException(400, "请提供验证 ID 或用户 ID")
-    return {"logs": [_log_json(record) for record in logs]}
+    geoip = _context(request).geoip
+    return {"logs": [_log_json(record, await geoip.lookup(record.ip_addr)) for record in logs]}
 
 
 @router.get("/ip/{ip_addr}")
 async def users_by_ip(request: Request, ip_addr: str, authorization: AuthHeader = None) -> dict[str, object]:
     require_bot_admin(request, authorization)
-    groups = await admin_ops.passed_users_by_ip(_context(request), _checked_ip(ip_addr))
+    context = _context(request)
+    groups = await admin_ops.passed_users_by_ip(context, _checked_ip(ip_addr))
     return {
+        "ip": ip_addr,
+        "location": await context.geoip.lookup(ip_addr),
         "groups": [
             {
                 "group_id": group.group_id,
@@ -139,7 +144,7 @@ async def users_by_ip(request: Request, ip_addr: str, authorization: AuthHeader 
                 ],
             }
             for group in groups
-        ]
+        ],
     }
 
 
