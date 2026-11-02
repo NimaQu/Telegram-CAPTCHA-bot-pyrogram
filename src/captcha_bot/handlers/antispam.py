@@ -78,7 +78,7 @@ def _message_image_source(message: Message) -> tuple[str | None, int | None]:
     document = message.document
     if document and document.mime_type in {"image/jpeg", "image/png"}:
         return document.file_id, document.file_size
-    # 视频、GIF、圆视频等取缩略图；贴纸的缩略图是 webp，会在 Image.detect 里被丢掉
+    # 视频、GIF、圆视频、贴纸都取缩略图；贴纸缩略图多是 webp，Image.detect 会转成 jpeg
     for media in (message.video, message.animation, message.video_note, document, message.sticker):
         thumbs = getattr(media, "thumbs", None) if media else None
         if thumbs:

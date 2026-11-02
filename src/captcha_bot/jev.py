@@ -7,8 +7,11 @@ import base64
 import logging
 from dataclasses import dataclass
 from enum import StrEnum
+from io import BytesIO
 
 import httpx
+from PIL import Image as PILImage
+from PIL import UnidentifiedImageError
 
 logger = logging.getLogger(__name__)
 
@@ -70,12 +73,30 @@ class Image:
 
     @classmethod
     def detect(cls, data: bytes) -> Image | None:
-        """jev 只接受 png/jpeg，其他格式(如贴纸的 webp)直接丢弃。"""
+        """jev 只接受 png/jpeg；webp(贴纸缩略图)转成 jpeg，其他格式丢弃。"""
         if data.startswith(b"\x89PNG\r\n\x1a\n"):
             return cls(data, "png")
         if data.startswith(b"\xff\xd8\xff"):
             return cls(data, "jpeg")
+        if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            return cls._webp_to_jpeg(data)
         return None
+
+    @classmethod
+    def _webp_to_jpeg(cls, data: bytes) -> Image | None:
+        try:
+            with PILImage.open(BytesIO(data)) as source:
+                source.seek(0)
+                rgba = source.convert("RGBA")
+        except UnidentifiedImageError, OSError, ValueError, EOFError:
+            logger.info("failed to decode webp image")
+            return None
+        # 贴纸大多是透明背景，jpeg 没有透明通道，铺白底
+        canvas = PILImage.new("RGB", rgba.size, (255, 255, 255))
+        canvas.paste(rgba, mask=rgba.getchannel("A"))
+        output = BytesIO()
+        canvas.save(output, "JPEG", quality=90)
+        return cls(output.getvalue(), "jpeg")
 
 
 @dataclass(frozen=True, slots=True)

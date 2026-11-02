@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 from collections.abc import AsyncIterator, Callable
 from datetime import date, datetime, timedelta
@@ -9,6 +10,7 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from PIL import Image as PILImage
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -88,6 +90,26 @@ def test_image_detect_only_accepts_png_and_jpeg() -> None:
     assert Image.detect(PNG) == Image(PNG, "png")
     assert Image.detect(JPEG) == Image(JPEG, "jpeg")
     assert Image.detect(b"RIFF....WEBP") is None
+    assert Image.detect(b"GIF89a") is None
+
+
+def test_image_detect_converts_webp_sticker_to_jpeg_on_white() -> None:
+    source = PILImage.new("RGBA", (8, 8), (0, 0, 0, 0))
+    source.paste((255, 0, 0, 255), (0, 0, 4, 8))
+    buffer = io.BytesIO()
+    source.save(buffer, "WEBP", lossless=True)
+    image = Image.detect(buffer.getvalue())
+    assert image is not None
+    assert image.format == "jpeg"
+    with PILImage.open(io.BytesIO(image.data)) as converted:
+        assert converted.format == "JPEG"
+        assert converted.size == (8, 8)
+        rgb = converted.convert("RGB")
+        red = rgb.getpixel((1, 4))
+        white = rgb.getpixel((6, 4))
+        assert isinstance(red, tuple) and isinstance(white, tuple)
+        assert red[0] > 200 and red[1] < 60 and red[2] < 60
+        assert min(white) > 200
 
 
 def test_config_defaults_and_validation() -> None:

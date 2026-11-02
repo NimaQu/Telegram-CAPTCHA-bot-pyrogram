@@ -330,6 +330,9 @@ def test_message_image_sources_and_helpers() -> None:
     assert handlers._message_image_source(video) == ("thumb", 10)
     document = message(photo=None, document=SimpleNamespace(mime_type="image/png", file_id="doc", file_size=5))
     assert handlers._message_image_source(document) == ("doc", 5)
+    small, big = SimpleNamespace(file_id="small", file_size=1), SimpleNamespace(file_id="big", file_size=3)
+    sticker = message(photo=None, sticker=SimpleNamespace(thumbs=[small, big]))
+    assert handlers._message_image_source(sticker) == ("big", 3)
     assert handlers._message_image_source(message(photo=None)) == (None, None)
     assert handlers._forwarded_from(message(forward_origin=None)) is None
     origin = SimpleNamespace(chat=None, sender_chat=None, sender_user=user(5))

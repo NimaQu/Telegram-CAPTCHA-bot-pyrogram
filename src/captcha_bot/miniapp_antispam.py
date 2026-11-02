@@ -231,7 +231,7 @@ def _decode_image(value: str | None) -> Image | None:
         raise HTTPException(400, "单张图片不能超过 2 MB")
     image = Image.detect(data)
     if image is None:
-        raise HTTPException(400, "图片只支持 JPG 和 PNG")
+        raise HTTPException(400, "图片只支持 JPG、PNG 和 WebP")
     return image
 
 
