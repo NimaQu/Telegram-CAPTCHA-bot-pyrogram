@@ -79,7 +79,26 @@ failed_auto_kick = "#AUTO_KICKED\n用户: {targetuserid}\n用户名: {targetuser
 message_deleted = "#MESSAGE_DELETED\n用户: {targetuserid}\n消息: {messageid}\n群组 ID: {groupid}\n群组标题: {grouptitle}"
 into_group = "#ADDBOT\n群组 ID: {groupid}\n群组标题: {grouptitle}"
 leave_message = "根据 Term of Service，本 Bot 无法对该群组提供服务。"
-self_introduction = "Telegram CAPTCHA Bot\nPowered by Kurigram"
+self_introduction = """
+👋 大家好，我是入群验证机器人，帮助本群挡住广告和机器人账号。
+
+**我能做什么**
+• 入群验证：新成员需要在限定时间内完成验证（数学题或网页验证），答错或超时会被移出群组
+• 全局黑名单：验证超时的账号短时间内再次入群会被直接移出，所有群通用
+• IP 封锁：拒绝来自已知打码农场 IP 段的网页验证
+• AI 反垃圾（可选）：检查新成员通过验证后的第一条消息，自动处理广告和垃圾信息
+• 举报投票：群成员可以发起举报，票数够了交给 AI 判断
+
+**使用前请先**
+把我设为管理员，并打开「删除消息」和「封禁用户」权限，否则验证无法正常工作。
+
+**群管理员**
+在群里发送 /config，或私聊我发送 /config 选择群组，就能在配置面板里修改验证方式、超时时间、失败处理、AI 反垃圾等设置，保存后立即生效。
+
+**群成员**
+• 回复一条可疑消息并发送 /report 发起举报
+• 发送 @admin 呼叫管理员
+"""
 challenge_not_for_you = "这次验证并不针对您"
 challenge_math = "用户 {target_id}，请在 {timeout} 秒内回答：\n{challenge}"
 challenge_math_private = "请在 {timeout} 秒内回答：\n{challenge}"
