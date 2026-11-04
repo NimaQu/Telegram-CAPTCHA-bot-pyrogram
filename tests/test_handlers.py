@@ -16,7 +16,7 @@ from captcha_bot.config import ChallengeType, Settings
 from captcha_bot.db.repository import BlacklistRecord, IpBlockRecord, LogRecord
 from captcha_bot.handlers import admin, challenge
 from captcha_bot.handlers.common import MemberRights
-from captcha_bot.ipblock import IpCheck, RuleError
+from captcha_bot.ipblock import IpCheck, RuleError, RulePage
 
 
 def context_for(settings: Settings, *, policy: Any | None = None) -> Any:
@@ -473,7 +473,7 @@ def test_registers_all_handlers(settings: Settings) -> None:
     client = cast(Client, SimpleNamespace(add_handler=add_handler))
     admin.register_admin_handlers(client, context)
     challenge.register_challenge_handlers(client, context)
-    assert add_handler.call_count == 21
+    assert add_handler.call_count == 22
 
 
 @pytest.mark.asyncio
@@ -525,7 +525,7 @@ async def test_ip_block_commands(settings: Settings) -> None:
     context.ipblock = SimpleNamespace(
         add=AsyncMock(side_effect=add),
         remove=AsyncMock(side_effect=remove),
-        rules=AsyncMock(side_effect=lambda: rules),
+        page=AsyncMock(side_effect=lambda page=1, search=None: RulePage(rules[:], len(rules), page, 20)),
         check=AsyncMock(side_effect=lambda ip: IpCheck(ip, None, rule if ip == "9.9.9.9" else None)),
         asn=SimpleNamespace(available=AsyncMock(return_value=False)),
     )
@@ -575,3 +575,56 @@ async def test_ip_block_commands(settings: Settings) -> None:
         message = message_for(user_id=admin_id, command=command)
         await admin.check_ip(context, cast(Client, None), message)
         assert expected in message.reply.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_blocklist_pagination_and_callback(settings: Settings) -> None:
+    context = context_for(settings)
+    rules = [
+        IpBlockRecord(index, "cidr", f"10.{index}.0.0/16", "x" * 80, 1, datetime(2026, 11, 4), 0, None)
+        for index in range(1, 46)
+    ]
+
+    async def page(number: int = 1, search: str | None = None) -> RulePage:
+        matched = [rule for rule in reversed(rules) if not search or search in rule.value]
+        last = max(1, -(-len(matched) // 20))
+        number = min(max(1, number), last)
+        return RulePage(matched[(number - 1) * 20 : number * 20], len(matched), number, 20)
+
+    context.ipblock = SimpleNamespace(page=AsyncMock(side_effect=page))
+    admin_id = settings.bot.admin_ids[0]
+
+    message = message_for(user_id=admin_id, command=["blocklist", "2", "10.1"])
+    await admin.block_list(context, cast(Client, None), message)
+    context.ipblock.page.assert_awaited_with(2, "10.1")
+
+    message = message_for(user_id=admin_id, command=["blocklist"])
+    await admin.block_list(context, cast(Client, None), message)
+    text = message.reply.await_args.args[0]
+    assert "共 45 条，第 1/3 页" in text and "#45" in text and "…" in text
+    keyboard = message.reply.await_args.kwargs["reply_markup"]
+    assert [button.callback_data for button in keyboard.inline_keyboard[0]] == ["ipb:2"]
+
+    client = context.client
+    query = SimpleNamespace(
+        id="q",
+        data="ipb:2",
+        from_user=SimpleNamespace(id=admin_id),
+        message=SimpleNamespace(id=7, chat=SimpleNamespace(id=1)),
+    )
+    await admin.block_list_callback(context, cast(Client, client), cast(Any, query))
+    edited = client.edit_message_text.await_args
+    assert "第 2/3 页" in edited.args[2]
+    assert [button.text for button in edited.kwargs["reply_markup"].inline_keyboard[0]] == ["« 上一页", "下一页 »"]
+    client.answer_callback_query.assert_awaited_with("q")
+
+    query.data = "ipb:3:10.1"
+    await admin.block_list_callback(context, cast(Client, client), cast(Any, query))
+    assert "匹配「10.1」的" in client.edit_message_text.await_args.args[2]
+    assert "reply_markup" not in client.edit_message_text.await_args.kwargs
+
+    client.edit_message_text.reset_mock()
+    for data, user_id in (("ipb:x", admin_id), ("ipb:2", 999)):
+        query.data, query.from_user = data, SimpleNamespace(id=user_id)
+        await admin.block_list_callback(context, cast(Client, client), cast(Any, query))
+    client.edit_message_text.assert_not_awaited()

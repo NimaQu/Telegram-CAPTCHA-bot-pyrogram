@@ -200,8 +200,18 @@
                 <input name="note" type="text" maxlength="200" placeholder="备注(可选)" autocomplete="off">
             </div>
             <button type="submit">添加规则</button>
-            <div class="results" id="block-rules"></div>
         </form>
+        <section class="group stack">
+            <div class="row">
+                <input id="block-search" type="search" maxlength="64" placeholder="搜索规则或备注" autocomplete="off">
+            </div>
+            <p class="meta" id="block-summary"></p>
+            <div class="results" id="block-rules"></div>
+            <div class="row pager" id="block-pager" hidden>
+                <button type="button" class="secondary" id="block-prev">上一页</button>
+                <button type="button" class="secondary" id="block-next">下一页</button>
+            </div>
+        </section>
         <form class="group stack" id="block-check-form">
             <div class="row">
                 <input name="ip" type="text" required placeholder="检查 IP，例如 108.187.4.79" autocomplete="off">

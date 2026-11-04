@@ -449,12 +449,45 @@
         const blockForm = document.getElementById("block-form");
         const rulesContainer = document.getElementById("block-rules");
         const asnWarning = document.getElementById("asn-unavailable");
+        const search = document.getElementById("block-search");
+        const summary = document.getElementById("block-summary");
+        const pager = document.getElementById("block-pager");
+        const prev = document.getElementById("block-prev");
+        const next = document.getElementById("block-next");
+        let page = 1;
+        let searchTimer = null;
 
         async function reload() {
-            const result = await api("admin/ipblock", { method: "GET" });
-            asnWarning.hidden = result.asn_available || !result.rules.some((rule) => rule.kind === "asn");
+            const query = new URLSearchParams({ page: String(page), q: search.value.trim() });
+            const result = await api(`admin/ipblock?${query}`, { method: "GET" });
+            page = result.page;
+            asnWarning.hidden = result.asn_available;
+            summary.textContent = result.total ? `共 ${result.total} 条，第 ${result.page}/${result.pages} 页（最新的在前）` : "";
+            pager.hidden = result.pages <= 1;
+            prev.disabled = result.page <= 1;
+            next.disabled = result.page >= result.pages;
             renderBlockRules(rulesContainer, result.rules, reload);
         }
+
+        function showError(error) {
+            showStatus(error.message, "error");
+        }
+
+        prev.addEventListener("click", () => {
+            page -= 1;
+            reload().catch(showError);
+        });
+        next.addEventListener("click", () => {
+            page += 1;
+            reload().catch(showError);
+        });
+        search.addEventListener("input", () => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => {
+                page = 1;
+                reload().catch(showError);
+            }, 300);
+        });
 
         blockForm.addEventListener("submit", (event) => {
             event.preventDefault();
@@ -462,6 +495,7 @@
             run(blockForm.querySelector("button"), async () => {
                 const result = await api("admin/ipblock", { method: "POST", body: JSON.stringify(payload) });
                 blockForm.reset();
+                page = 1;
                 await reload();
                 return result.message;
             });
@@ -483,7 +517,7 @@
             });
         });
 
-        reload().catch((error) => showStatus(error.message, "error"));
+        reload().catch(showError);
     }
 
     function setupAdminView() {

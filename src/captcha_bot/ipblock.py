@@ -17,6 +17,7 @@ KIND_ASN = "asn"
 # 更大的范围应该用 ASN 规则表达，避免误封整片地址
 MIN_PREFIX = {4: 16, 6: 32}
 MAX_NOTE_LENGTH = 200
+PAGE_SIZE = 20
 ASN_PATTERN = re.compile(r"(?i)^(?:as)?(\d{1,10})$")
 
 
@@ -58,6 +59,12 @@ def describe(rule: IpBlockRecord) -> str:
 class RuleRepository(Protocol):
     async def ip_block_rules(self) -> list[IpBlockRecord]: ...
 
+    async def ip_block_rule_page(
+        self, offset: int, limit: int, search: str | None = None
+    ) -> tuple[list[IpBlockRecord], int]: ...
+
+    async def find_ip_block_rule(self, kind: str, value: str) -> IpBlockRecord | None: ...
+
     async def add_ip_block_rule(
         self, kind: str, value: str, note: str, created_by: int | None
     ) -> IpBlockRecord | None: ...
@@ -65,6 +72,18 @@ class RuleRepository(Protocol):
     async def delete_ip_block_rule(self, rule_id: int) -> IpBlockRecord | None: ...
 
     async def record_ip_block_hit(self, rule_id: int, when: datetime) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RulePage:
+    rules: list[IpBlockRecord]
+    total: int
+    page: int
+    page_size: int
+
+    @property
+    def pages(self) -> int:
+        return max(1, -(-self.total // self.page_size))
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,8 +122,15 @@ class IpBlocklist:
         assert self._networks is not None
         return self._networks
 
-    async def rules(self) -> list[IpBlockRecord]:
-        return await self.repository.ip_block_rules()
+    async def page(self, page: int = 1, search: str | None = None, page_size: int = PAGE_SIZE) -> RulePage:
+        """page 从 1 开始；超出范围时返回最后一页。"""
+        page = max(1, page)
+        rules, total = await self.repository.ip_block_rule_page((page - 1) * page_size, page_size, search)
+        last = max(1, -(-total // page_size))
+        if page > last:
+            page = last
+            rules, total = await self.repository.ip_block_rule_page((page - 1) * page_size, page_size, search)
+        return RulePage(rules, total, page, page_size)
 
     async def add(self, text: str, note: str, created_by: int | None) -> IpBlockRecord:
         parsed = parse_rule(text)
@@ -127,10 +153,8 @@ class IpBlocklist:
             rule_id = int(raw)
         else:
             parsed = parse_rule(raw)
-            for rule in await self.repository.ip_block_rules():
-                if rule.kind == parsed.kind and rule.value == parsed.value:
-                    rule_id = rule.id
-                    break
+            found = await self.repository.find_ip_block_rule(parsed.kind, parsed.value)
+            rule_id = found.id if found else None
         if rule_id is None:
             return None
         record = await self.repository.delete_ip_block_rule(rule_id)

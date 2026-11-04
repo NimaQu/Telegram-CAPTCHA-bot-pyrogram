@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from pyrogram.errors import ChatAdminRequired, RPCError
 
@@ -191,11 +191,20 @@ def _rule_json(rule: IpBlockRecord) -> dict[str, object]:
 
 
 @router.get("/ipblock")
-async def list_block_rules(request: Request, authorization: AuthHeader = None) -> dict[str, object]:
+async def list_block_rules(
+    request: Request,
+    page: Annotated[int, Query(ge=1, le=100_000)] = 1,
+    q: Annotated[str, Query(max_length=64)] = "",
+    authorization: AuthHeader = None,
+) -> dict[str, object]:
     require_bot_admin(request, authorization)
     ipblock = _context(request).ipblock
+    result = await ipblock.page(page, q.strip() or None)
     return {
-        "rules": [_rule_json(rule) for rule in await ipblock.rules()],
+        "rules": [_rule_json(rule) for rule in result.rules],
+        "total": result.total,
+        "page": result.page,
+        "pages": result.pages,
         "asn_available": await ipblock.asn.available(),
     }
 

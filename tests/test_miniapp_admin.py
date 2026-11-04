@@ -19,7 +19,7 @@ from captcha_bot import miniapp_admin
 from captcha_bot.asn import AsnInfo
 from captcha_bot.config import Settings
 from captcha_bot.db.repository import IpBlockRecord, LogRecord
-from captcha_bot.ipblock import IpCheck, RuleError
+from captcha_bot.ipblock import IpCheck, RuleError, RulePage
 
 
 def init_data(user_id: int, token: str) -> str:
@@ -174,7 +174,7 @@ def blocklist_context(context: Any) -> None:
         return rule if text == "1" else None
 
     context.ipblock = SimpleNamespace(
-        rules=AsyncMock(return_value=[rule]),
+        page=AsyncMock(return_value=RulePage([rule], 41, 3, 20)),
         add=AsyncMock(side_effect=add),
         remove=AsyncMock(side_effect=remove),
         check=AsyncMock(side_effect=lambda ip: IpCheck(ip, AsnInfo(138995, "Spam"), rule)),
@@ -191,6 +191,11 @@ async def test_admin_ip_block_rules(settings: Settings) -> None:
         listed = (await client.get("/miniapp/api/admin/ipblock", headers=headers(settings))).json()
         assert listed["asn_available"] is False
         assert listed["rules"][0]["value"] == "108.187.4.0/24" and listed["rules"][0]["hits"] == 2
+        assert (listed["total"], listed["page"], listed["pages"]) == (41, 3, 3)
+        searched = await client.get("/miniapp/api/admin/ipblock?page=3&q=%20AS1%20", headers=headers(settings))
+        assert searched.status_code == 200
+        context.ipblock.page.assert_awaited_with(3, "AS1")
+        assert (await client.get("/miniapp/api/admin/ipblock?page=0", headers=headers(settings))).status_code == 422
 
         added = await client.post(
             "/miniapp/api/admin/ipblock", headers=headers(settings), json={"rule": "108.187.4.79/24", "note": "农场"}

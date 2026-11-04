@@ -8,7 +8,7 @@ from typing import Any, ClassVar
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import delete, event, func, inspect, select, text, update
+from sqlalchemy import delete, event, func, inspect, or_, select, text, update
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
@@ -598,6 +598,34 @@ class Repository:
         async with self.sessions() as session:
             rows = (await session.scalars(select(IpBlockRule).order_by(IpBlockRule.id))).all()
         return [self._to_ip_block(row) for row in rows]
+
+    async def ip_block_rule_page(
+        self, offset: int, limit: int, search: str | None = None
+    ) -> tuple[list[IpBlockRecord], int]:
+        """按 ID 倒序(最新的在前)分页；search 匹配规则值或备注，`AS123` 会去掉 AS 前缀匹配 ASN。"""
+        criteria: list[Any] = []
+        term = (search or "").strip()
+        if term:
+            escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{escaped}%"
+            conditions = [
+                IpBlockRule.value.like(pattern, escape="\\"),
+                IpBlockRule.note.like(pattern, escape="\\"),
+            ]
+            if term[:2].lower() == "as" and term[2:].isdigit():
+                conditions.append((IpBlockRule.kind == "asn") & IpBlockRule.value.like(f"%{term[2:]}%"))
+            criteria.append(or_(*conditions))
+        statement = select(IpBlockRule).where(*criteria).order_by(IpBlockRule.id.desc()).offset(offset).limit(limit)
+        async with self.sessions() as session:
+            total = int(await session.scalar(select(func.count()).select_from(IpBlockRule).where(*criteria)) or 0)
+            rows = (await session.scalars(statement)).all()
+        return [self._to_ip_block(row) for row in rows], total
+
+    async def find_ip_block_rule(self, kind: str, value: str) -> IpBlockRecord | None:
+        statement = select(IpBlockRule).where(IpBlockRule.kind == kind, IpBlockRule.value == value)
+        async with self.sessions() as session:
+            row = await session.scalar(statement)
+        return None if row is None else self._to_ip_block(row)
 
     async def add_ip_block_rule(self, kind: str, value: str, note: str, created_by: int | None) -> IpBlockRecord | None:
         """规则已存在时返回 None。"""

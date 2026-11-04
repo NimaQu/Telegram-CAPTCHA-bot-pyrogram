@@ -257,6 +257,15 @@ async def test_repository_ip_block_rules_and_reputation_switch(
         await repository.record_ip_block_hit(rule.id, datetime(2026, 11, 4, 13))
         stored = {item.id: item for item in await repository.ip_block_rules()}
         assert stored[rule.id].hits == 2 and stored[rule.id].last_hit_at == datetime(2026, 11, 4, 13)
+        assert await repository.find_ip_block_rule("asn", "138995") == asn
+        assert await repository.find_ip_block_rule("asn", "1") is None
+        rows, total = await repository.ip_block_rule_page(0, 10)
+        assert total == 2 and [row.id for row in rows] == [asn.id, rule.id]
+        rows, total = await repository.ip_block_rule_page(1, 1)
+        assert total == 2 and [row.id for row in rows] == [rule.id]
+        for term, expected in (("农场", [rule.id]), ("AS1389", [asn.id]), ("108.187", [rule.id]), ("100%", [])):
+            rows, total = await repository.ip_block_rule_page(0, 10, term)
+            assert [row.id for row in rows] == expected and total == len(expected)
         deleted = await repository.delete_ip_block_rule(asn.id)
         assert deleted is not None and deleted.value == "138995"
         assert await repository.delete_ip_block_rule(asn.id) is None

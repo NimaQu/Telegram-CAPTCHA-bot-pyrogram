@@ -147,7 +147,7 @@ uv run captcha-bot update-qqwry --config config.toml
 
 针对人工打码通过网页验证的 spam 账号：Bot 管理员维护一张全局封锁表，规则可以是 CIDR（如 `108.187.4.0/24`，输入 `108.187.4.79/24` 会自动规范化）或 ASN（如 `AS138995`）。用户在 Turnstile 网页验证通过后，如果 IP 命中规则，本次验证会被拒绝（页面提示与普通失败相同），用户仍处于待验证状态，到时按该群的超时逻辑处理；命中记录写入验证日志（状态 `Blocked`）并发送到日志频道。规则只影响之后的验证，已通过的用户不受影响。
 
-- 私聊命令：`/blockip <CIDR|ASN> [备注]`、`/unblockip <规则ID|CIDR|ASN>`、`/blocklist`、`/checkip <IP>`；Mini App 管理面板中也可以管理。
+- 私聊命令：`/blockip <CIDR|ASN> [备注]`、`/unblockip <规则ID|CIDR|ASN>`、`/blocklist [页码] [搜索词]`（每页 20 条，最新的在前，带翻页按钮；搜索匹配规则值或备注）、`/checkip <IP>`；Mini App 管理面板中也可以分页查看和搜索。
 - 为避免误封，IPv4 前缀不能短于 `/16`，IPv6 不能短于 `/32`，更大的范围请用 ASN 规则。
 - 默认对所有群生效（`[defaults].enable_ip_reputation`），群管理员可以在 `/config` 面板里关闭本群的「IP 声誉检测」。只有网页验证能拿到 IP，数学题验证不受影响。
 

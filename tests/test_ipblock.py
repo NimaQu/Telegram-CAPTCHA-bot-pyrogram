@@ -60,6 +60,15 @@ class FakeRepository:
         self.next_id += 1
         return record
 
+    async def ip_block_rule_page(
+        self, offset: int, limit: int, search: str | None = None
+    ) -> tuple[list[IpBlockRecord], int]:
+        rows = [row for row in reversed(self.rows.values()) if not search or search in row.value + row.note]
+        return rows[offset : offset + limit], len(rows)
+
+    async def find_ip_block_rule(self, kind: str, value: str) -> IpBlockRecord | None:
+        return next((row for row in self.rows.values() if row.kind == kind and row.value == value), None)
+
     async def delete_ip_block_rule(self, rule_id: int) -> IpBlockRecord | None:
         return self.rows.pop(rule_id, None)
 
@@ -102,7 +111,7 @@ async def test_blocklist_matches_cidr_and_asn() -> None:
 
     await service.record_hit(cidr)
     assert repository.hits == [cidr.id]
-    assert len(await service.rules()) == 3
+    assert (await service.page()).total == 3
 
 
 @pytest.mark.asyncio
@@ -134,7 +143,7 @@ async def test_blocklist_remove_by_id_cidr_and_asn() -> None:
     assert await service.remove("AS1") is None
     with pytest.raises(RuleError):
         await service.remove("nonsense")
-    assert await service.rules() == []
+    assert (await service.page()).rules == []
 
 
 @pytest.mark.asyncio
@@ -144,3 +153,20 @@ async def test_blocklist_loads_rules_once() -> None:
     assert (await service.check("10.1.2.3")).rule is not None
     await service.check("10.2.0.1")
     assert repository.loads == 1
+
+
+@pytest.mark.asyncio
+async def test_blocklist_pages_and_clamps() -> None:
+    service, _ = blocklist()
+    for index in range(5):
+        await service.add(f"10.{index}.0.0/16", "farm" if index % 2 else "", 1)
+    first = await service.page(1, page_size=2)
+    assert [rule.value for rule in first.rules] == ["10.4.0.0/16", "10.3.0.0/16"]
+    assert first.total == 5 and first.pages == 3
+    last = await service.page(99, page_size=2)
+    assert last.page == 3 and [rule.value for rule in last.rules] == ["10.0.0.0/16"]
+    assert (await service.page(0, page_size=2)).page == 1
+    found = await service.page(1, "farm", page_size=2)
+    assert found.total == 2 and found.pages == 1
+    empty = await service.page(5, "nothing")
+    assert empty.page == 1 and empty.pages == 1 and empty.rules == []

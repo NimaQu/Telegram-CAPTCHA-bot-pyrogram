@@ -3,13 +3,22 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 from functools import partial
+from typing import Any
 
 from pyrogram import Client, filters
 from pyrogram.enums import ChatMemberStatus
 from pyrogram.enums.chat_members_filter import ChatMembersFilter
 from pyrogram.errors import BadRequest, ChatAdminRequired, RPCError
-from pyrogram.handlers import MessageHandler
-from pyrogram.types import LinkPreviewOptions, Message, MessageOriginHiddenUser, MessageOriginUser
+from pyrogram.handlers import CallbackQueryHandler, MessageHandler
+from pyrogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    LinkPreviewOptions,
+    Message,
+    MessageOriginHiddenUser,
+    MessageOriginUser,
+)
 
 from captcha_bot import admin_ops
 from captcha_bot.context import AppContext
@@ -24,7 +33,7 @@ from captcha_bot.handlers.common import (
     split_long_message,
     valid_ip,
 )
-from captcha_bot.ipblock import RuleError, describe
+from captcha_bot.ipblock import RuleError, RulePage, describe
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +256,8 @@ async def ban_user_by_ip(context: AppContext, client: Client, message: Message) 
 def format_rule(rule: IpBlockRecord) -> str:
     text = f"#{rule.id} `{describe(rule)}`"
     if rule.note:
-        text += f" {rule.note}"
+        # 列表每页 20 条，截断备注避免超过 Telegram 单条消息长度
+        text += f" {rule.note[:60]}{'…' if len(rule.note) > 60 else ''}"
     last_hit = rule.last_hit_at.strftime("%Y-%m-%d %H:%M") if rule.last_hit_at else "从未"
     return f"{text}\n  命中 {rule.hits} 次，最近: {last_hit}"
 
@@ -295,16 +305,62 @@ async def unblock_ip(context: AppContext, _client: Client, message: Message) -> 
     await message.reply(f"已删除封锁规则 #{rule.id} `{describe(rule)}`")
 
 
+BLOCKLIST_PREFIX = "ipb:"
+
+
+def blocklist_page_text(result: RulePage, search: str) -> str:
+    scope = f"匹配「{search}」的" if search else ""
+    if not result.rules:
+        return f"没有{scope}IP 封锁规则" if search else "还没有 IP 封锁规则，使用 /blockip 添加"
+    header = f"{scope}IP 封锁规则共 {result.total} 条，第 {result.page}/{result.pages} 页(最新的在前):\n\n"
+    return header + "\n".join(format_rule(rule) for rule in result.rules)
+
+
+def blocklist_keyboard(result: RulePage, search: str) -> InlineKeyboardMarkup | None:
+    if result.pages <= 1:
+        return None
+    buttons = []
+    # callback_data 最长 64 字节，搜索词过长时截断
+    suffix = f":{search}".encode()[:40].decode(errors="ignore") if search else ""
+    if result.page > 1:
+        buttons.append(InlineKeyboardButton("« 上一页", callback_data=f"{BLOCKLIST_PREFIX}{result.page - 1}{suffix}"))
+    if result.page < result.pages:
+        buttons.append(InlineKeyboardButton("下一页 »", callback_data=f"{BLOCKLIST_PREFIX}{result.page + 1}{suffix}"))
+    return InlineKeyboardMarkup([buttons])
+
+
 async def block_list(context: AppContext, _client: Client, message: Message) -> None:
+    """/blocklist [页码] [搜索词]，搜索词匹配规则值或备注。"""
     if message.from_user is None or not is_bot_admin(context, message.from_user.id):
         return
-    rules = await context.ipblock.rules()
-    if not rules:
-        await message.reply("还没有 IP 封锁规则，使用 /blockip 添加")
+    arguments = (message.command or [])[1:]
+    page = 1
+    if arguments and arguments[0].isdigit():
+        page = int(arguments.pop(0))
+    search = " ".join(arguments)
+    result = await context.ipblock.page(page, search or None)
+    await message.reply(blocklist_page_text(result, search), reply_markup=blocklist_keyboard(result, search))
+
+
+async def block_list_callback(context: AppContext, client: Client, query: CallbackQuery) -> None:
+    message = query.message
+    if not is_bot_admin(context, query.from_user.id) or message is None or message.chat is None:
         return
-    text = f"IP 封锁规则共 {len(rules)} 条:\n\n" + "\n".join(format_rule(rule) for rule in rules)
-    for chunk in split_long_message(text):
-        await message.reply(chunk)
+    chat_id = message.chat.id
+    if chat_id is None:
+        return
+    page_text, _, search = str(query.data).removeprefix(BLOCKLIST_PREFIX).partition(":")
+    if not page_text.isdigit():
+        return
+    result = await context.ipblock.page(int(page_text), search or None)
+    keyboard = blocklist_keyboard(result, search)
+    # 不传 reply_markup 时 Telegram 会去掉原有按钮
+    extra: dict[str, Any] = {"reply_markup": keyboard} if keyboard else {}
+    try:
+        await client.edit_message_text(chat_id, message.id, blocklist_page_text(result, search), **extra)
+    except RPCError:
+        logger.info("failed to edit blocklist page")
+    await client.answer_callback_query(query.id)
 
 
 async def check_ip(context: AppContext, _client: Client, message: Message) -> None:
@@ -354,3 +410,7 @@ def register_admin_handlers(client: Client, context: AppContext) -> None:
     ]
     for callback, handler_filter in handlers:
         client.add_handler(MessageHandler(partial(callback, context), handler_filter))
+    # 放在 -1 组，先于验证题的回调路由处理
+    client.add_handler(
+        CallbackQueryHandler(partial(block_list_callback, context), filters.regex(f"^{BLOCKLIST_PREFIX}")), group=-1
+    )

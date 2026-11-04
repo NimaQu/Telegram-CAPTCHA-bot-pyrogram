@@ -272,3 +272,7 @@ button.secondary {
 #antispam-usage {
     margin: 12px 4px;
 }
+
+.pager button {
+    flex: 1;
+}
