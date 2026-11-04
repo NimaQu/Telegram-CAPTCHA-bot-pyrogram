@@ -13,10 +13,9 @@ from pyrogram.types import ChatJoinRequest, MessageOriginHiddenUser, MessageOrig
 
 from captcha_bot.challenges import ChallengeKind, ChallengeRegistry, ChallengeSession
 from captcha_bot.config import ChallengeType, Settings
-from captcha_bot.db.repository import BlacklistRecord, IpBlockRecord, LogRecord
+from captcha_bot.db.repository import BlacklistRecord, LogRecord
 from captcha_bot.handlers import admin, challenge
 from captcha_bot.handlers.common import MemberRights
-from captcha_bot.ipblock import IpCheck, RuleError, RulePage
 
 
 def context_for(settings: Settings, *, policy: Any | None = None) -> Any:
@@ -114,35 +113,7 @@ async def test_basic_admin_commands_and_reload(settings: Settings) -> None:
 
 
 @pytest.mark.asyncio
-async def test_leave_and_set_config_commands(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
-    context = context_for(settings)
-    usage = message_for(text="/leave")
-    await admin.leave_command(context, context.client, usage)
-    assert "使用方法" in usage.reply.await_args.args[0]
-
-    valid = message_for(text="/leave -2002")
-    await admin.leave_command(context, context.client, valid)
-    context.client.leave_chat.assert_awaited_once_with(-2002, delete=True)
-
-    monkeypatch.setattr(admin, "can_restrict_members", AsyncMock(return_value=True))
-    command = message_for(text="/faset challenge_timeout 90")
-    await admin.set_config(context, context.client, command)
-    context.repository.set_group_config.assert_awaited_once()
-    assert command.reply.await_args.args[0] == "配置项设置成功"
-
-    context.repository.set_group_config.side_effect = ValueError("invalid")
-    await admin.set_config(context, context.client, command)
-    assert command.reply.await_args.args[0] == "invalid"
-
-    monkeypatch.setattr(admin, "can_restrict_members", AsyncMock(return_value=False))
-    monkeypatch.setattr(admin, "schedule", close_schedule)
-    denied = message_for(text="/faset challenge_timeout 90")
-    await admin.set_config(context, context.client, denied)
-    assert denied.reply.await_args.args[0] == settings.messages.permission_denied
-
-
-@pytest.mark.asyncio
-async def test_admin_log_ip_sender_and_forward_commands(settings: Settings) -> None:
+async def test_sender_and_forward_commands(settings: Settings) -> None:
     context = context_for(settings)
     bad_sender = message_for(command=["sender", "bad"])
     await admin.sender_command(context, context.client, bad_sender)
@@ -155,28 +126,7 @@ async def test_admin_log_ip_sender_and_forward_commands(settings: Settings) -> N
     await admin.sender_command(context, context.client, sender)
     assert sender.reply.await_args.args[0] == "42"
 
-    get_log = message_for(command=["getlog", "challenge"])
     record = LogRecord(-1001, 42, "challenge", "1.2.3.4", "UA", "Passed", datetime(2026, 1, 1))
-    context.repository.logs_by_challenge.return_value = [record]
-    await admin.get_log(context, context.client, get_log)
-    assert "IP地址: `1.2.3.4` (测试归属地)" in get_log.reply.await_args.args[0]
-
-    invalid_ip = message_for(command=["getuserbyip", "bad"])
-    await admin.get_user_by_ip(context, context.client, invalid_ip)
-    assert invalid_ip.reply.await_args.args[0] == "IP 地址格式错误"
-
-    context.repository.passed_users_by_ip.return_value = [(-1001, 42, datetime.now()), (-1001, 43, None)]
-    by_ip = message_for(command=["getuserbyip", "127.0.0.1"])
-    await admin.get_user_by_ip(context, context.client, by_ip)
-    assert "用户共 2 个" in by_ip.reply.await_args.args[0]
-    assert "IP `127.0.0.1` (测试归属地)" in by_ip.reply.await_args.args[0]
-
-    no_users = message_for(command=["banuserbyip", "127.0.0.1", "-1001"])
-    await admin.ban_user_by_ip(context, context.client, no_users)
-    assert "没有找到" in no_users.reply.await_args.args[0]
-    context.repository.passed_user_ids_by_ip_and_group.return_value = [42, 43]
-    await admin.ban_user_by_ip(context, context.client, no_users)
-    assert "成功 2 个" in no_users.reply.await_args.args[0]
 
     forwarded = message_for()
     await admin.forwarded_user_record(context, context.client, forwarded)
@@ -473,7 +423,7 @@ def test_registers_all_handlers(settings: Settings) -> None:
     client = cast(Client, SimpleNamespace(add_handler=add_handler))
     admin.register_admin_handlers(client, context)
     challenge.register_challenge_handlers(client, context)
-    assert add_handler.call_count == 22
+    assert add_handler.call_count == 12
 
 
 @pytest.mark.asyncio
@@ -504,127 +454,3 @@ async def test_help_requires_group_admin(settings: Settings, monkeypatch: pytest
     allowed = message_for()
     await admin.help_command(context, context.client, allowed)
     assert allowed.reply.await_args.args[0] == settings.messages.self_introduction
-
-
-@pytest.mark.asyncio
-async def test_ip_block_commands(settings: Settings) -> None:
-    context = context_for(settings)
-    rule = IpBlockRecord(4, "asn", "138995", "农场", 1, datetime(2026, 11, 4), 3, datetime(2026, 11, 4, 9, 30))
-
-    async def add(text: str, note: str, created_by: int | None) -> IpBlockRecord:
-        if text == "bad":
-            raise RuleError("无法识别 `bad`")
-        return rule
-
-    async def remove(text: str) -> IpBlockRecord | None:
-        if text == "bad":
-            raise RuleError("无法识别")
-        return rule if text == "4" else None
-
-    rules: list[IpBlockRecord] = []
-    context.ipblock = SimpleNamespace(
-        add=AsyncMock(side_effect=add),
-        remove=AsyncMock(side_effect=remove),
-        page=AsyncMock(side_effect=lambda page=1, search=None: RulePage(rules[:], len(rules), page, 20)),
-        check=AsyncMock(side_effect=lambda ip: IpCheck(ip, None, rule if ip == "9.9.9.9" else None)),
-        asn=SimpleNamespace(available=AsyncMock(return_value=False)),
-    )
-    admin_id = settings.bot.admin_ids[0]
-
-    ignored = message_for(user_id=999, text="/blockip AS138995")
-    await admin.block_ip(context, cast(Client, None), ignored)
-    ignored.reply.assert_not_awaited()
-
-    usage = message_for(user_id=admin_id, text="/blockip")
-    await admin.block_ip(context, cast(Client, None), usage)
-    assert "使用方法" in usage.reply.await_args.args[0]
-
-    added = message_for(user_id=admin_id, text="/blockip AS138995 农场 机房")
-    await admin.block_ip(context, cast(Client, None), added)
-    context.ipblock.add.assert_awaited_with("AS138995", "农场 机房", admin_id)
-    assert "#4 `AS138995`" in added.reply.await_args.args[0]
-    assert "update-asn" in added.reply.await_args.args[0]
-
-    bad = message_for(user_id=admin_id, text="/blockip bad")
-    await admin.block_ip(context, cast(Client, None), bad)
-    assert "无法识别" in bad.reply.await_args.args[0]
-
-    empty = message_for(user_id=admin_id, command=["blocklist"])
-    await admin.block_list(context, cast(Client, None), empty)
-    assert "还没有" in empty.reply.await_args.args[0]
-    rules.append(rule)
-    listed = message_for(user_id=admin_id, command=["blocklist"])
-    await admin.block_list(context, cast(Client, None), listed)
-    assert "命中 3 次，最近: 2026-11-04 09:30" in listed.reply.await_args.args[0]
-
-    for command, expected in (
-        (["unblockip"], "使用方法"),
-        (["unblockip", "bad"], "无法识别"),
-        (["unblockip", "7"], "没有找到"),
-        (["unblockip", "4"], "已删除封锁规则 #4"),
-    ):
-        message = message_for(user_id=admin_id, command=command)
-        await admin.unblock_ip(context, cast(Client, None), message)
-        assert expected in message.reply.await_args.args[0]
-
-    for command, expected in (
-        (["checkip", "nope"], "使用方法"),
-        (["checkip", "9.9.9.9"], "命中规则 #4"),
-        (["checkip", "1.1.1.1"], "未命中"),
-    ):
-        message = message_for(user_id=admin_id, command=command)
-        await admin.check_ip(context, cast(Client, None), message)
-        assert expected in message.reply.await_args.args[0]
-
-
-@pytest.mark.asyncio
-async def test_blocklist_pagination_and_callback(settings: Settings) -> None:
-    context = context_for(settings)
-    rules = [
-        IpBlockRecord(index, "cidr", f"10.{index}.0.0/16", "x" * 80, 1, datetime(2026, 11, 4), 0, None)
-        for index in range(1, 46)
-    ]
-
-    async def page(number: int = 1, search: str | None = None) -> RulePage:
-        matched = [rule for rule in reversed(rules) if not search or search in rule.value]
-        last = max(1, -(-len(matched) // 20))
-        number = min(max(1, number), last)
-        return RulePage(matched[(number - 1) * 20 : number * 20], len(matched), number, 20)
-
-    context.ipblock = SimpleNamespace(page=AsyncMock(side_effect=page))
-    admin_id = settings.bot.admin_ids[0]
-
-    message = message_for(user_id=admin_id, command=["blocklist", "2", "10.1"])
-    await admin.block_list(context, cast(Client, None), message)
-    context.ipblock.page.assert_awaited_with(2, "10.1")
-
-    message = message_for(user_id=admin_id, command=["blocklist"])
-    await admin.block_list(context, cast(Client, None), message)
-    text = message.reply.await_args.args[0]
-    assert "共 45 条，第 1/3 页" in text and "#45" in text and "…" in text
-    keyboard = message.reply.await_args.kwargs["reply_markup"]
-    assert [button.callback_data for button in keyboard.inline_keyboard[0]] == ["ipb:2"]
-
-    client = context.client
-    query = SimpleNamespace(
-        id="q",
-        data="ipb:2",
-        from_user=SimpleNamespace(id=admin_id),
-        message=SimpleNamespace(id=7, chat=SimpleNamespace(id=1)),
-    )
-    await admin.block_list_callback(context, cast(Client, client), cast(Any, query))
-    edited = client.edit_message_text.await_args
-    assert "第 2/3 页" in edited.args[2]
-    assert [button.text for button in edited.kwargs["reply_markup"].inline_keyboard[0]] == ["« 上一页", "下一页 »"]
-    client.answer_callback_query.assert_awaited_with("q")
-
-    query.data = "ipb:3:10.1"
-    await admin.block_list_callback(context, cast(Client, client), cast(Any, query))
-    assert "匹配「10.1」的" in client.edit_message_text.await_args.args[2]
-    assert "reply_markup" not in client.edit_message_text.await_args.kwargs
-
-    client.edit_message_text.reset_mock()
-    for data, user_id in (("ipb:x", admin_id), ("ipb:2", 999)):
-        query.data, query.from_user = data, SimpleNamespace(id=user_id)
-        await admin.block_list_callback(context, cast(Client, client), cast(Any, query))
-    client.edit_message_text.assert_not_awaited()

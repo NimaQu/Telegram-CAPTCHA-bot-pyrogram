@@ -78,21 +78,9 @@ Web 服务保留以下接口：
 
 Telegram 中的 `/reload` 会先完整校验 TOML。仅 `[defaults]` 与 `[messages]` 可以热更新；Bot 身份、数据库、Web、代理或 Turnstile 等启动级配置变化时会拒绝重载并提示重启，旧配置继续生效。
 
-群管理员可继续使用原语法设置群策略：
-
-```text
-/faset challenge_timeout 120
-/faset challenge_type recaptcha
-/faset challenge_failed_action kick
-/faset challenge_timeout_action ban
-/faset enable_global_blacklist true
-```
-
-首次设置由 SQLite upsert 原子写入并立即生效。
-
 ## Mini App 配置面板
 
-群管理员也可以在 Telegram Mini App 里图形化修改上述群策略。要求该用户是群主，或是同时拥有「删除消息」和「封禁/限制用户」权限的管理员。
+群策略只能在 Telegram Mini App 里修改（原来的 `/faset` 指令已移除），保存后立即生效。要求该用户是群主，或是同时拥有「删除消息」和「封禁/限制用户」权限的管理员。
 
 两种入口：
 
@@ -106,14 +94,14 @@ Telegram 中的 `/reload` 会先完整校验 TOML。仅 `[defaults]` 与 `[messa
 
 ### Bot 管理面板
 
-`[bot].admin_ids` 中的 Bot 管理员私聊发送 `/admin` 可打开管理面板，提供与私聊指令相同的功能：
+`[bot].admin_ids` 中的 Bot 管理员私聊发送 `/admin` 可打开管理面板。需要参数的管理操作只在面板里提供，私聊只保留无参数的快捷指令：
 
-| 面板功能 | 对应指令 |
+| 面板功能 | 私聊快捷方式 |
 | --- | --- |
-| 按验证 ID / 用户 ID 查询验证记录 | `/getlog`、转发消息查询 |
-| 按 IP 查询通过验证的用户，并按群一键封禁 | `/getuserbyip`、`/banuserbyip` |
-| 管理 IP 段/ASN 封锁规则 | `/blockip`、`/unblockip`、`/blocklist`、`/checkip` |
-| 让 Bot 离开群组 | `/leave` |
+| 按验证 ID / 用户 ID 查询验证记录 | 转发该用户的消息给 Bot |
+| 按 IP 查询通过验证的用户，并按群一键封禁 | — |
+| 管理 IP 段/ASN 封锁规则（分页、搜索、检查 IP） | — |
+| 让 Bot 离开群组 | — |
 | 重载配置文件 | `/reload` |
 | 清理黑名单中已删号的用户（后台执行，完成后私聊通知） | `/clean` |
 
@@ -121,7 +109,7 @@ Telegram 中的 `/reload` 会先完整校验 TOML。仅 `[defaults]` 与 `[messa
 
 ## IP 归属地
 
-Bot 输出 IP 时（`/getlog`、`/getuserbyip`、`/banuserbyip`、转发消息查询以及 Mini App 管理面板）会附带归属地，IP 用 inline code 包裹，在 Telegram 里点一下即可复制，例如：
+Bot 输出 IP 时（转发消息查询、日志频道以及 Mini App 管理面板）会附带归属地，IP 用 inline code 包裹，在 Telegram 里点一下即可复制，例如：
 
 ```text
 IP地址: `114.114.114.114` (中国–江苏–南京 南京信风网络科技有限公司GreatbitDNS服务器)
@@ -147,7 +135,7 @@ uv run captcha-bot update-qqwry --config config.toml
 
 针对人工打码通过网页验证的 spam 账号：Bot 管理员维护一张全局封锁表，规则可以是 CIDR（如 `108.187.4.0/24`，输入 `108.187.4.79/24` 会自动规范化）或 ASN（如 `AS138995`）。用户在 Turnstile 网页验证通过后，如果 IP 命中规则，本次验证会被拒绝（页面提示与普通失败相同），用户仍处于待验证状态，到时按该群的超时逻辑处理；命中记录写入验证日志（状态 `Blocked`）并发送到日志频道。规则只影响之后的验证，已通过的用户不受影响。
 
-- 私聊命令：`/blockip <CIDR|ASN> [备注]`、`/unblockip <规则ID|CIDR|ASN>`、`/blocklist [页码] [搜索词]`（每页 20 条，最新的在前，带翻页按钮；搜索匹配规则值或备注）、`/checkip <IP>`；Mini App 管理面板中也可以分页查看和搜索。
+- 在 Mini App 管理面板里添加、删除、搜索规则（每页 20 条，最新的在前），也可以检查某个 IP 会不会被拦。
 - 为避免误封，IPv4 前缀不能短于 `/16`，IPv6 不能短于 `/32`，更大的范围请用 ASN 规则。
 - 默认对所有群生效（`[defaults].enable_ip_reputation`），群管理员可以在 `/config` 面板里关闭本群的「IP 声誉检测」。只有网页验证能拿到 IP，数学题验证不受影响。
 
@@ -161,7 +149,7 @@ uv run captcha-bot update-asn --config config.toml
 
 ## 命令菜单
 
-Bot 启动时会自动设置命令菜单，无需在 BotFather 中 `/setcommands`：群聊显示 `/config`、`/help`，私聊显示 `/config`、`/sender`；`admin_ids` 中的管理员在与 Bot 的私聊里额外看到 `/admin`、`/getlog`、`/getuserbyip`、`/banuserbyip`、`/blockip`、`/unblockip`、`/blocklist`、`/checkip`、`/leave`、`/reload`、`/clean`、`/ping`。管理员需要先私聊过 Bot，否则无法为其设置专属菜单（日志中会有警告，私聊 Bot 后重启即可）。
+Bot 启动时会自动设置命令菜单，无需在 BotFather 中 `/setcommands`：群聊显示 `/config`、`/help`，私聊显示 `/config`、`/sender`；`admin_ids` 中的管理员在与 Bot 的私聊里额外看到 `/admin`、`/reload`、`/clean`、`/ping`。管理员需要先私聊过 Bot，否则无法为其设置专属菜单（日志中会有警告，私聊 Bot 后重启即可）。
 
 部署要求：Mini App 必须通过 HTTPS 访问。默认使用 `turnstile.base_url` 作为公网地址，也可以在 `[web]` 中单独设置 `public_url`。页面地址为 `<public_url>/miniapp`，可以在 BotFather 中把它设为 Bot 的 Menu Button 或 Main Mini App；通过 `startapp=<群 ID>` 打开时同样可用。
 

@@ -13,7 +13,7 @@ from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
-from captcha_bot.config import ChallengeType, DefaultPolicy, FailedAction, Settings
+from captcha_bot.config import ChallengeType, FailedAction, Settings
 from captcha_bot.db.models import (
     AntispamConfig,
     AntispamPending,
@@ -183,14 +183,6 @@ class Database:
 class Repository:
     # Stay below SQLite's historical default of 999 bound variables per statement.
     DELETE_BATCH_SIZE: ClassVar[int] = 500
-    GROUP_FIELDS: ClassVar[dict[str, str]] = {
-        "challenge_failed_action": "failed_action",
-        "challenge_timeout_action": "timeout_action",
-        "challenge_timeout": "timeout",
-        "challenge_type": "challenge_type",
-        "enable_global_blacklist": "global_blacklist",
-        "enable_ip_reputation": "ip_reputation",
-    }
 
     def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self.sessions = sessions
@@ -256,43 +248,6 @@ class Repository:
                 enable_global_blacklist=group.global_blacklist,
                 enable_ip_reputation=group.ip_reputation,
             )
-
-    async def set_group_config(self, group_id: int, key: str, value: str, defaults: DefaultPolicy) -> None:
-        normalized_key = key.lower()
-        column_name = self.GROUP_FIELDS.get(normalized_key)
-        if column_name is None:
-            raise ValueError(f"不支持的配置项: {key}")
-        parsed: int | str | bool
-        if normalized_key == "challenge_timeout":
-            parsed = int(value)
-            if parsed <= 0:
-                raise ValueError("challenge_timeout 必须为正整数")
-        elif normalized_key in {"challenge_failed_action", "challenge_timeout_action"}:
-            parsed = FailedAction(value.lower()).value
-        elif normalized_key == "challenge_type":
-            parsed = ChallengeType(value.lower()).value
-        else:
-            normalized = value.lower()
-            if normalized not in {"0", "1", "true", "false"}:
-                raise ValueError(f"{key} 必须为 0/1/true/false")
-            parsed = normalized in {"1", "true"}
-        base_values: dict[str, Any] = {
-            "chat_id": group_id,
-            "timeout": defaults.challenge_timeout,
-            "challenge_type": defaults.challenge_type.value,
-            "failed_action": defaults.challenge_failed_action.value,
-            "timeout_action": defaults.challenge_timeout_action.value,
-            "global_blacklist": defaults.enable_global_blacklist,
-            "ip_reputation": defaults.enable_ip_reputation,
-            column_name: parsed,
-        }
-        statement = insert(GroupConfig).values(**base_values)
-        statement = statement.on_conflict_do_update(
-            index_elements=[GroupConfig.chat_id],
-            set_={column_name: parsed},
-        )
-        async with self.sessions.begin() as session:
-            await session.execute(statement)
 
     async def save_group_overrides(self, group_id: int, overrides: GroupOverrides) -> None:
         values: dict[str, Any] = {

@@ -3,17 +3,13 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 from functools import partial
-from typing import Any
 
 from pyrogram import Client, filters
 from pyrogram.enums import ChatMemberStatus
 from pyrogram.enums.chat_members_filter import ChatMembersFilter
-from pyrogram.errors import BadRequest, ChatAdminRequired, RPCError
-from pyrogram.handlers import CallbackQueryHandler, MessageHandler
+from pyrogram.errors import BadRequest, RPCError
+from pyrogram.handlers import MessageHandler
 from pyrogram.types import (
-    CallbackQuery,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
     LinkPreviewOptions,
     Message,
     MessageOriginHiddenUser,
@@ -22,18 +18,14 @@ from pyrogram.types import (
 
 from captcha_bot import admin_ops
 from captcha_bot.context import AppContext
-from captcha_bot.db.repository import IpBlockRecord, LogRecord
+from captcha_bot.db.repository import LogRecord
 from captcha_bot.handlers.common import (
     ChatUnavailable,
-    can_restrict_members,
     extract_message_ids,
     fetch_member_rights,
     is_bot_admin,
     schedule,
-    split_long_message,
-    valid_ip,
 )
-from captcha_bot.ipblock import RuleError, RulePage, describe
 
 logger = logging.getLogger(__name__)
 
@@ -98,22 +90,6 @@ async def call_admin(context: AppContext, client: Client, message: Message) -> N
     schedule(reply.delete(), delay=300, name=f"delete-admin-call:{reply.id}")
 
 
-async def leave_command(context: AppContext, client: Client, message: Message) -> None:
-    if message.from_user is None or not is_bot_admin(context, message.from_user.id) or not message.text:
-        return
-    arguments = message.text.split()
-    if len(arguments) != 2:
-        await message.reply("使用方法: /leave [group_id]")
-        return
-    try:
-        chat_id = int(arguments[1])
-        await admin_ops.leave_group(context, chat_id)
-    except ValueError, RPCError:
-        await message.reply("指令出错了！可能是 bot 不在参数所在群里。")
-        return
-    await message.reply(f"已离开群组: `{chat_id}`")
-
-
 async def clean_database(context: AppContext, client: Client, message: Message) -> None:
     if message.from_user is None or not is_bot_admin(context, message.from_user.id):
         return
@@ -121,34 +97,6 @@ async def clean_database(context: AppContext, client: Client, message: Message) 
     await message.reply(f"开始整理数据库，请稍等...\n预计需要时间:{timedelta(seconds=len(user_ids) // 4)}")
     result = await admin_ops.clean_deleted_users(context)
     await message.reply(f"已成功清除{len(result.deleted)}个已经删号的用户，共有{result.failures}个用户信息获取失败。")
-
-
-async def set_config(context: AppContext, client: Client, message: Message) -> None:
-    if message.from_user is None or message.chat is None or not message.text:
-        await message.reply("请从个人账号发送指令。")
-        return
-    chat_id = message.chat.id
-    if chat_id is None:
-        return
-    if not await can_restrict_members(client, chat_id, message.from_user.id):
-        reply = await message.reply(context.config.settings.messages.permission_denied)
-        schedule(reply.delete(), delay=5, name=f"delete-permission:{reply.id}")
-        schedule(message.delete(), delay=5, name=f"delete-command:{message.id}")
-        return
-    arguments = message.text.split(maxsplit=2)
-    if len(arguments) != 3:
-        await message.reply(
-            "使用方法:\n/faset [配置项] [值]\n\n"
-            "配置项: challenge_failed_action, challenge_timeout_action, challenge_timeout, "
-            "challenge_type, enable_global_blacklist, enable_ip_reputation"
-        )
-        return
-    try:
-        await context.repository.set_group_config(chat_id, arguments[1], arguments[2], context.config.settings.defaults)
-    except (ValueError, TypeError) as exc:
-        await message.reply(str(exc))
-        return
-    await message.reply("配置项设置成功")
 
 
 async def sender_command(_context: AppContext, client: Client, message: Message) -> None:
@@ -183,198 +131,6 @@ async def sender_command(_context: AppContext, client: Client, message: Message)
     await message.reply(found.from_user.mention(str(found.from_user.id)))
 
 
-async def get_log(context: AppContext, _client: Client, message: Message) -> None:
-    if message.from_user is None or not is_bot_admin(context, message.from_user.id):
-        return
-    if not message.command or len(message.command) != 2:
-        await message.reply("使用方法: /getlog [challenge_id]")
-        return
-    logs = await context.repository.logs_by_challenge(message.command[1])
-    await message.reply(await format_logs(context, logs) if logs else "没有找到相关记录")
-
-
-async def get_user_by_ip(context: AppContext, client: Client, message: Message) -> None:
-    if message.from_user is None or not is_bot_admin(context, message.from_user.id):
-        return
-    if not message.command or len(message.command) != 2:
-        await message.reply("使用方法: /getuserbyip [ip]\n例如: `/getuserbyip 123.56.67.8`")
-        return
-    ip_addr = message.command[1]
-    if not valid_ip(ip_addr):
-        await message.reply("IP 地址格式错误")
-        return
-    groups = await admin_ops.passed_users_by_ip(context, ip_addr)
-    if not groups:
-        await message.reply("没有找到通过该 IP 验证的用户")
-        return
-    records = sum(len(group.users) for group in groups)
-    unique_users = len({user_id for group in groups for user_id, _ in group.users})
-    ip_text = await context.geoip.format(ip_addr)
-    text = f"IP {ip_text} 通过验证的用户共 {unique_users} 个，用户/群记录 {records} 条，涉及 {len(groups)} 个群:\n\n"
-    for group in groups:
-        text += f"群组: {group.title} (`{group.group_id}`)\n"
-        text += "".join(
-            f"- [用户](tg://user?id={user_id}) `{user_id}` 最近通过: `{passed_at}`\n"
-            for user_id, passed_at in group.users
-        )
-        text += "\n"
-    for chunk in split_long_message(text):
-        await message.reply(chunk, link_preview_options=NO_LINK_PREVIEW)
-
-
-async def ban_user_by_ip(context: AppContext, client: Client, message: Message) -> None:
-    if message.from_user is None or not is_bot_admin(context, message.from_user.id):
-        return
-    if not message.command or len(message.command) != 3:
-        await message.reply("使用方法: /banuserbyip [ip] [group_id]")
-        return
-    ip_addr = message.command[1]
-    if not valid_ip(ip_addr):
-        await message.reply("IP 地址格式错误")
-        return
-    try:
-        group_id = int(message.command[2])
-    except ValueError:
-        await message.reply("群组 ID 格式错误")
-        return
-    try:
-        result = await admin_ops.ban_users_by_ip(context, ip_addr, group_id)
-    except ChatAdminRequired:
-        await message.reply("封禁失败: Bot 在该群没有封禁用户权限")
-        return
-    if result is None:
-        await message.reply("没有找到在该群通过这个 IP 验证的用户")
-        return
-    ip_text = await context.geoip.format(ip_addr)
-    text = f"IP {ip_text}\n封禁完成: 成功 {result.success} 个，失败 {len(result.failures)} 个。"
-    if result.failures:
-        text += "\n\n失败列表:\n" + "".join(f"- `{user_id}`: `{error}`\n" for user_id, error in result.failures)
-    for chunk in split_long_message(text):
-        await message.reply(chunk)
-
-
-def format_rule(rule: IpBlockRecord) -> str:
-    text = f"#{rule.id} `{describe(rule)}`"
-    if rule.note:
-        # 列表每页 20 条，截断备注避免超过 Telegram 单条消息长度
-        text += f" {rule.note[:60]}{'…' if len(rule.note) > 60 else ''}"
-    last_hit = rule.last_hit_at.strftime("%Y-%m-%d %H:%M") if rule.last_hit_at else "从未"
-    return f"{text}\n  命中 {rule.hits} 次，最近: {last_hit}"
-
-
-async def block_ip(context: AppContext, _client: Client, message: Message) -> None:
-    if message.from_user is None or not is_bot_admin(context, message.from_user.id) or not message.text:
-        return
-    arguments = message.text.split(maxsplit=2)
-    if len(arguments) < 2:
-        await message.reply(
-            "使用方法: /blockip [CIDR|ASN] [备注]\n"
-            "例如: `/blockip 108.187.4.0/24 打码农场` 或 `/blockip AS138995`\n"
-            "只影响之后的网页验证，已通过的用户不受影响。"
-        )
-        return
-    try:
-        rule = await context.ipblock.add(
-            arguments[1], arguments[2] if len(arguments) == 3 else "", message.from_user.id
-        )
-    except RuleError as exc:
-        await message.reply(str(exc))
-        return
-    logger.info("IP block rule added", extra={"admin_id": message.from_user.id, "rule_id": rule.id})
-    text = f"已添加封锁规则 #{rule.id} `{describe(rule)}`"
-    if rule.kind == "asn" and not await context.ipblock.asn.available():
-        text += "\n注意: 当前没有可用的 ASN 数据库，ASN 规则暂不生效，请运行 `captcha-bot update-asn`"
-    await message.reply(text)
-
-
-async def unblock_ip(context: AppContext, _client: Client, message: Message) -> None:
-    if message.from_user is None or not is_bot_admin(context, message.from_user.id):
-        return
-    if not message.command or len(message.command) != 2:
-        await message.reply("使用方法: /unblockip [规则ID|CIDR|ASN]\n例如: `/unblockip 3` 或 `/unblockip AS138995`")
-        return
-    try:
-        rule = await context.ipblock.remove(message.command[1])
-    except RuleError as exc:
-        await message.reply(str(exc))
-        return
-    if rule is None:
-        await message.reply("没有找到这条规则")
-        return
-    logger.info("IP block rule removed", extra={"admin_id": message.from_user.id, "rule_id": rule.id})
-    await message.reply(f"已删除封锁规则 #{rule.id} `{describe(rule)}`")
-
-
-BLOCKLIST_PREFIX = "ipb:"
-
-
-def blocklist_page_text(result: RulePage, search: str) -> str:
-    scope = f"匹配「{search}」的" if search else ""
-    if not result.rules:
-        return f"没有{scope}IP 封锁规则" if search else "还没有 IP 封锁规则，使用 /blockip 添加"
-    header = f"{scope}IP 封锁规则共 {result.total} 条，第 {result.page}/{result.pages} 页(最新的在前):\n\n"
-    return header + "\n".join(format_rule(rule) for rule in result.rules)
-
-
-def blocklist_keyboard(result: RulePage, search: str) -> InlineKeyboardMarkup | None:
-    if result.pages <= 1:
-        return None
-    buttons = []
-    # callback_data 最长 64 字节，搜索词过长时截断
-    suffix = f":{search}".encode()[:40].decode(errors="ignore") if search else ""
-    if result.page > 1:
-        buttons.append(InlineKeyboardButton("« 上一页", callback_data=f"{BLOCKLIST_PREFIX}{result.page - 1}{suffix}"))
-    if result.page < result.pages:
-        buttons.append(InlineKeyboardButton("下一页 »", callback_data=f"{BLOCKLIST_PREFIX}{result.page + 1}{suffix}"))
-    return InlineKeyboardMarkup([buttons])
-
-
-async def block_list(context: AppContext, _client: Client, message: Message) -> None:
-    """/blocklist [页码] [搜索词]，搜索词匹配规则值或备注。"""
-    if message.from_user is None or not is_bot_admin(context, message.from_user.id):
-        return
-    arguments = (message.command or [])[1:]
-    page = 1
-    if arguments and arguments[0].isdigit():
-        page = int(arguments.pop(0))
-    search = " ".join(arguments)
-    result = await context.ipblock.page(page, search or None)
-    await message.reply(blocklist_page_text(result, search), reply_markup=blocklist_keyboard(result, search))
-
-
-async def block_list_callback(context: AppContext, client: Client, query: CallbackQuery) -> None:
-    message = query.message
-    if not is_bot_admin(context, query.from_user.id) or message is None or message.chat is None:
-        return
-    chat_id = message.chat.id
-    if chat_id is None:
-        return
-    page_text, _, search = str(query.data).removeprefix(BLOCKLIST_PREFIX).partition(":")
-    if not page_text.isdigit():
-        return
-    result = await context.ipblock.page(int(page_text), search or None)
-    keyboard = blocklist_keyboard(result, search)
-    # 不传 reply_markup 时 Telegram 会去掉原有按钮
-    extra: dict[str, Any] = {"reply_markup": keyboard} if keyboard else {}
-    try:
-        await client.edit_message_text(chat_id, message.id, blocklist_page_text(result, search), **extra)
-    except RPCError:
-        logger.info("failed to edit blocklist page")
-    await client.answer_callback_query(query.id)
-
-
-async def check_ip(context: AppContext, _client: Client, message: Message) -> None:
-    if message.from_user is None or not is_bot_admin(context, message.from_user.id):
-        return
-    if not message.command or len(message.command) != 2 or not valid_ip(message.command[1]):
-        await message.reply("使用方法: /checkip [ip]\n例如: `/checkip 108.187.4.79`")
-        return
-    ip_addr = message.command[1]
-    result = await context.ipblock.check(ip_addr)
-    verdict = f"命中规则 {format_rule(result.rule)}" if result.rule else "未命中任何封锁规则"
-    await message.reply(f"IP {await context.geoip.format(ip_addr)}\n{verdict}")
-
-
 async def forwarded_user_record(context: AppContext, _client: Client, message: Message) -> None:
     if message.from_user is None or not is_bot_admin(context, message.from_user.id):
         return
@@ -395,22 +151,9 @@ def register_admin_handlers(client: Client, context: AppContext) -> None:
         (help_command, filters.command("help") & filters.group),
         (ping_command, filters.command("ping") & filters.private),
         (call_admin, filters.command("admin", prefixes="@") & filters.group),
-        (leave_command, filters.command("leave") & filters.private),
         (clean_database, filters.command("clean") & filters.private),
-        (set_config, filters.command("faset") & filters.group),
         (sender_command, filters.command("sender") & filters.private),
-        (get_log, filters.command("getlog") & filters.private),
-        (get_user_by_ip, filters.command("getuserbyip") & filters.private),
-        (ban_user_by_ip, filters.command("banuserbyip") & filters.private),
-        (block_ip, filters.command("blockip") & filters.private),
-        (unblock_ip, filters.command("unblockip") & filters.private),
-        (block_list, filters.command("blocklist") & filters.private),
-        (check_ip, filters.command("checkip") & filters.private),
         (forwarded_user_record, filters.forwarded & filters.private),
     ]
     for callback, handler_filter in handlers:
         client.add_handler(MessageHandler(partial(callback, context), handler_filter))
-    # 放在 -1 组，先于验证题的回调路由处理
-    client.add_handler(
-        CallbackQueryHandler(partial(block_list_callback, context), filters.regex(f"^{BLOCKLIST_PREFIX}")), group=-1
-    )

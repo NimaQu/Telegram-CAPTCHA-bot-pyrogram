@@ -184,17 +184,7 @@ async def test_repository_concurrent_upserts_and_log_deduplication(
     repository = Repository(database.sessions)
     try:
         await asyncio.wait_for(database.ensure_schema_current(), timeout=10)
-        await asyncio.wait_for(
-            asyncio.gather(
-                repository.set_group_config(-2002, "challenge_timeout", "75", settings.defaults),
-                repository.set_group_config(-2002, "challenge_type", "recaptcha", settings.defaults),
-            ),
-            timeout=10,
-        )
-        overrides = await repository.get_group_overrides(-2002)
-        assert overrides is not None
-        assert overrides.challenge_timeout == 75
-        assert overrides.challenge_type == "recaptcha"
+        assert await repository.get_group_overrides(-2002) is None
 
         replacement = GroupOverrides(30, FailedAction.BAN, FailedAction.KICK, ChallengeType.MATH, False)
         await repository.save_group_overrides(-2002, replacement)
@@ -241,10 +231,12 @@ async def test_repository_ip_block_rules_and_reputation_switch(
     database = Database(settings)
     repository = Repository(database.sessions)
     try:
-        await repository.set_group_config(-3003, "enable_ip_reputation", "false", settings.defaults)
-        overrides = await repository.get_group_overrides(-3003)
-        assert overrides is not None and not overrides.enable_ip_reputation and overrides.enable_global_blacklist
-        await repository.set_group_config(-3004, "challenge_timeout", "90", settings.defaults)
+        switched_off = GroupOverrides(90, FailedAction.KICK, FailedAction.KICK, ChallengeType.RECAPTCHA, True, False)
+        await repository.save_group_overrides(-3003, switched_off)
+        assert await repository.get_group_overrides(-3003) == switched_off
+        await repository.save_group_overrides(
+            -3004, GroupOverrides(90, FailedAction.KICK, FailedAction.KICK, ChallengeType.MATH, True)
+        )
         defaults = await repository.get_group_overrides(-3004)
         assert defaults is not None and defaults.enable_ip_reputation
 

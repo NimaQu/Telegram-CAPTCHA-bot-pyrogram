@@ -113,17 +113,6 @@ async def test_group_config_parsing_and_immediate_reads(settings: Settings) -> N
     overrides = await repository.get_group_overrides(-1)
     assert overrides is not None and overrides.challenge_timeout == 90 and not overrides.enable_global_blacklist
 
-    await repository.set_group_config(-1, "CHALLENGE_TIMEOUT", "120", settings.defaults)
-    await repository.set_group_config(-1, "challenge_type", "recaptcha", settings.defaults)
-    await repository.set_group_config(-1, "challenge_failed_action", "ban", settings.defaults)
-    await repository.set_group_config(-1, "enable_global_blacklist", "false", settings.defaults)
-    with pytest.raises(ValueError, match="正整数"):
-        await repository.set_group_config(-1, "challenge_timeout", "0", settings.defaults)
-    with pytest.raises(ValueError, match="0/1"):
-        await repository.set_group_config(-1, "enable_global_blacklist", "perhaps", settings.defaults)
-    with pytest.raises(ValueError, match="不支持"):
-        await repository.set_group_config(-1, "unknown", "1", settings.defaults)
-
 
 @pytest.mark.asyncio
 async def test_log_deduplication_queries_and_ip_lookups() -> None:
