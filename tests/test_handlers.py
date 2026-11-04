@@ -13,9 +13,10 @@ from pyrogram.types import ChatJoinRequest, MessageOriginHiddenUser, MessageOrig
 
 from captcha_bot.challenges import ChallengeKind, ChallengeRegistry, ChallengeSession
 from captcha_bot.config import ChallengeType, Settings
-from captcha_bot.db.repository import BlacklistRecord, LogRecord
+from captcha_bot.db.repository import BlacklistRecord, IpBlockRecord, LogRecord
 from captcha_bot.handlers import admin, challenge
 from captcha_bot.handlers.common import MemberRights
+from captcha_bot.ipblock import IpCheck, RuleError
 
 
 def context_for(settings: Settings, *, policy: Any | None = None) -> Any:
@@ -472,7 +473,7 @@ def test_registers_all_handlers(settings: Settings) -> None:
     client = cast(Client, SimpleNamespace(add_handler=add_handler))
     admin.register_admin_handlers(client, context)
     challenge.register_challenge_handlers(client, context)
-    assert add_handler.call_count == 17
+    assert add_handler.call_count == 21
 
 
 @pytest.mark.asyncio
@@ -503,3 +504,74 @@ async def test_help_requires_group_admin(settings: Settings, monkeypatch: pytest
     allowed = message_for()
     await admin.help_command(context, context.client, allowed)
     assert allowed.reply.await_args.args[0] == settings.messages.self_introduction
+
+
+@pytest.mark.asyncio
+async def test_ip_block_commands(settings: Settings) -> None:
+    context = context_for(settings)
+    rule = IpBlockRecord(4, "asn", "138995", "农场", 1, datetime(2026, 11, 4), 3, datetime(2026, 11, 4, 9, 30))
+
+    async def add(text: str, note: str, created_by: int | None) -> IpBlockRecord:
+        if text == "bad":
+            raise RuleError("无法识别 `bad`")
+        return rule
+
+    async def remove(text: str) -> IpBlockRecord | None:
+        if text == "bad":
+            raise RuleError("无法识别")
+        return rule if text == "4" else None
+
+    rules: list[IpBlockRecord] = []
+    context.ipblock = SimpleNamespace(
+        add=AsyncMock(side_effect=add),
+        remove=AsyncMock(side_effect=remove),
+        rules=AsyncMock(side_effect=lambda: rules),
+        check=AsyncMock(side_effect=lambda ip: IpCheck(ip, None, rule if ip == "9.9.9.9" else None)),
+        asn=SimpleNamespace(available=AsyncMock(return_value=False)),
+    )
+    admin_id = settings.bot.admin_ids[0]
+
+    ignored = message_for(user_id=999, text="/blockip AS138995")
+    await admin.block_ip(context, cast(Client, None), ignored)
+    ignored.reply.assert_not_awaited()
+
+    usage = message_for(user_id=admin_id, text="/blockip")
+    await admin.block_ip(context, cast(Client, None), usage)
+    assert "使用方法" in usage.reply.await_args.args[0]
+
+    added = message_for(user_id=admin_id, text="/blockip AS138995 农场 机房")
+    await admin.block_ip(context, cast(Client, None), added)
+    context.ipblock.add.assert_awaited_with("AS138995", "农场 机房", admin_id)
+    assert "#4 `AS138995`" in added.reply.await_args.args[0]
+    assert "update-asn" in added.reply.await_args.args[0]
+
+    bad = message_for(user_id=admin_id, text="/blockip bad")
+    await admin.block_ip(context, cast(Client, None), bad)
+    assert "无法识别" in bad.reply.await_args.args[0]
+
+    empty = message_for(user_id=admin_id, command=["blocklist"])
+    await admin.block_list(context, cast(Client, None), empty)
+    assert "还没有" in empty.reply.await_args.args[0]
+    rules.append(rule)
+    listed = message_for(user_id=admin_id, command=["blocklist"])
+    await admin.block_list(context, cast(Client, None), listed)
+    assert "命中 3 次，最近: 2026-11-04 09:30" in listed.reply.await_args.args[0]
+
+    for command, expected in (
+        (["unblockip"], "使用方法"),
+        (["unblockip", "bad"], "无法识别"),
+        (["unblockip", "7"], "没有找到"),
+        (["unblockip", "4"], "已删除封锁规则 #4"),
+    ):
+        message = message_for(user_id=admin_id, command=command)
+        await admin.unblock_ip(context, cast(Client, None), message)
+        assert expected in message.reply.await_args.args[0]
+
+    for command, expected in (
+        (["checkip", "nope"], "使用方法"),
+        (["checkip", "9.9.9.9"], "命中规则 #4"),
+        (["checkip", "1.1.1.1"], "未命中"),
+    ):
+        message = message_for(user_id=admin_id, command=command)
+        await admin.check_ip(context, cast(Client, None), message)
+        assert expected in message.reply.await_args.args[0]

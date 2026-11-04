@@ -112,6 +112,7 @@ Telegram 中的 `/reload` 会先完整校验 TOML。仅 `[defaults]` 与 `[messa
 | --- | --- |
 | 按验证 ID / 用户 ID 查询验证记录 | `/getlog`、转发消息查询 |
 | 按 IP 查询通过验证的用户，并按群一键封禁 | `/getuserbyip`、`/banuserbyip` |
+| 管理 IP 段/ASN 封锁规则 | `/blockip`、`/unblockip`、`/blocklist`、`/checkip` |
 | 让 Bot 离开群组 | `/leave` |
 | 重载配置文件 | `/reload` |
 | 清理黑名单中已删号的用户（后台执行，完成后私聊通知） | `/clean` |
@@ -140,9 +141,27 @@ uv run captcha-bot update-qqwry --config config.toml
 
 文件不存在或 `qqwry_path` 留空时，归属地功能自动关闭，其他功能不受影响。
 
+配置了 ASN 数据库后，归属地后面还会显示 IP 所属的 ASN，例如 `` `1.2.3.4` (美国, AS138995 Example Networks) ``。
+
+## IP 封锁
+
+针对人工打码通过网页验证的 spam 账号：Bot 管理员维护一张全局封锁表，规则可以是 CIDR（如 `108.187.4.0/24`，输入 `108.187.4.79/24` 会自动规范化）或 ASN（如 `AS138995`）。用户在 Turnstile 网页验证通过后，如果 IP 命中规则，本次验证会被拒绝（页面提示与普通失败相同），用户仍处于待验证状态，到时按该群的超时逻辑处理；命中记录写入验证日志（状态 `Blocked`）并发送到日志频道。规则只影响之后的验证，已通过的用户不受影响。
+
+- 私聊命令：`/blockip <CIDR|ASN> [备注]`、`/unblockip <规则ID|CIDR|ASN>`、`/blocklist`、`/checkip <IP>`；Mini App 管理面板中也可以管理。
+- 为避免误封，IPv4 前缀不能短于 `/16`，IPv6 不能短于 `/32`，更大的范围请用 ASN 规则。
+- 默认对所有群生效（`[defaults].enable_ip_reputation`），群管理员可以在 `/config` 面板里关闭本群的「IP 声誉检测」。只有网页验证能拿到 IP，数学题验证不受影响。
+
+ASN 数据使用 [MaxMind GeoLite2-ASN](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data)，需要免费注册获取 license key，填入 `[geoip].maxmind_license_key`（建议同时填 `maxmind_account_id`），然后下载：
+
+```bash
+uv run captcha-bot update-asn --config config.toml
+```
+
+文件原子替换到 `[geoip].asn_path`，运行中的机器人会自动重新加载。MaxMind 每周二、五更新，可以用 cron 定期执行。数据库不存在时 ASN 规则不生效，CIDR 规则照常工作。
+
 ## 命令菜单
 
-Bot 启动时会自动设置命令菜单，无需在 BotFather 中 `/setcommands`：群聊显示 `/config`、`/help`，私聊显示 `/config`、`/sender`；`admin_ids` 中的管理员在与 Bot 的私聊里额外看到 `/admin`、`/getlog`、`/getuserbyip`、`/banuserbyip`、`/leave`、`/reload`、`/clean`、`/ping`。管理员需要先私聊过 Bot，否则无法为其设置专属菜单（日志中会有警告，私聊 Bot 后重启即可）。
+Bot 启动时会自动设置命令菜单，无需在 BotFather 中 `/setcommands`：群聊显示 `/config`、`/help`，私聊显示 `/config`、`/sender`；`admin_ids` 中的管理员在与 Bot 的私聊里额外看到 `/admin`、`/getlog`、`/getuserbyip`、`/banuserbyip`、`/blockip`、`/unblockip`、`/blocklist`、`/checkip`、`/leave`、`/reload`、`/clean`、`/ping`。管理员需要先私聊过 Bot，否则无法为其设置专属菜单（日志中会有警告，私聊 Bot 后重启即可）。
 
 部署要求：Mini App 必须通过 HTTPS 访问。默认使用 `turnstile.base_url` 作为公网地址，也可以在 `[web]` 中单独设置 `public_url`。页面地址为 `<public_url>/miniapp`，可以在 BotFather 中把它设为 Bot 的 Menu Button 或 Main Mini App；通过 `startapp=<群 ID>` 打开时同样可用。
 

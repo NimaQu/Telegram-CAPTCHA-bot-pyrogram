@@ -15,6 +15,8 @@ class RecaptchaLogAction(StrEnum):
     PAGE_VISIT = "PageVisit"
     FAILED = "Failed"
     PASSED = "Passed"
+    # 通过了 Turnstile，但 IP 命中封锁规则被拒绝
+    BLOCKED = "Blocked"
 
 
 class BlacklistUser(Base):
@@ -42,6 +44,26 @@ class GroupConfig(Base):
     failed_action: Mapped[str] = mapped_column(String(10), nullable=False, default="kick")
     timeout_action: Mapped[str] = mapped_column(String(10), nullable=False, default="kick")
     global_blacklist: Mapped[bool] = mapped_column(nullable=False, default=True)
+    ip_reputation: Mapped[bool] = mapped_column(nullable=False, default=True, server_default="1")
+
+
+class IpBlockRule(Base):
+    """全局 IP 封锁规则，网页验证时拒绝命中的访问者。"""
+
+    __tablename__ = "ip_block_rule"
+    __table_args__ = (
+        UniqueConstraint("kind", "value", name="uq_ip_block_rule_kind_value"),
+        CheckConstraint("kind IN ('cidr', 'asn')", name="ck_ip_block_rule_kind"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(8), nullable=False)
+    value: Mapped[str] = mapped_column(String(64), nullable=False)
+    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_by: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+    hits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_hit_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class RecaptchaLog(Base):

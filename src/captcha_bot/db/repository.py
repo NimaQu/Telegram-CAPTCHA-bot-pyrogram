@@ -20,6 +20,7 @@ from captcha_bot.db.models import (
     AntispamUsage,
     BlacklistUser,
     GroupConfig,
+    IpBlockRule,
     RecaptchaLog,
     RecaptchaLogAction,
 )
@@ -39,6 +40,19 @@ class GroupOverrides:
     challenge_failed_action: FailedAction
     challenge_type: ChallengeType
     enable_global_blacklist: bool
+    enable_ip_reputation: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class IpBlockRecord:
+    id: int
+    kind: str
+    value: str
+    note: str
+    created_by: int | None
+    created_at: datetime
+    hits: int
+    last_hit_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +189,7 @@ class Repository:
         "challenge_timeout": "timeout",
         "challenge_type": "challenge_type",
         "enable_global_blacklist": "global_blacklist",
+        "enable_ip_reputation": "ip_reputation",
     }
 
     def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
@@ -239,6 +254,7 @@ class Repository:
                 challenge_failed_action=FailedAction(group.failed_action),
                 challenge_type=ChallengeType(group.challenge_type),
                 enable_global_blacklist=group.global_blacklist,
+                enable_ip_reputation=group.ip_reputation,
             )
 
     async def set_group_config(self, group_id: int, key: str, value: str, defaults: DefaultPolicy) -> None:
@@ -267,6 +283,7 @@ class Repository:
             "failed_action": defaults.challenge_failed_action.value,
             "timeout_action": defaults.challenge_timeout_action.value,
             "global_blacklist": defaults.enable_global_blacklist,
+            "ip_reputation": defaults.enable_ip_reputation,
             column_name: parsed,
         }
         statement = insert(GroupConfig).values(**base_values)
@@ -284,6 +301,7 @@ class Repository:
             "failed_action": overrides.challenge_failed_action.value,
             "timeout_action": overrides.challenge_timeout_action.value,
             "global_blacklist": overrides.enable_global_blacklist,
+            "ip_reputation": overrides.enable_ip_reputation,
         }
         statement = insert(GroupConfig).values(chat_id=group_id, **values)
         statement = statement.on_conflict_do_update(index_elements=[GroupConfig.chat_id], set_=values)
@@ -298,7 +316,8 @@ class Repository:
         ip_addr: str,
         user_agent: str,
         action: RecaptchaLogAction,
-    ) -> None:
+    ) -> bool:
+        """返回是否新增了记录；同一事件重复发生时只记一次。"""
         statement = insert(RecaptchaLog).values(
             challenge_id=challenge_id,
             user_id=user_id,
@@ -317,7 +336,8 @@ class Repository:
             ]
         )
         async with self.sessions.begin() as session:
-            await session.execute(statement)
+            result = await session.execute(statement)
+        return bool(getattr(result, "rowcount", 0))
 
     @staticmethod
     def _to_log(row: RecaptchaLog) -> LogRecord:
@@ -567,3 +587,42 @@ class Repository:
             month_calls=sum(row.calls for row in rows),
             month_tokens=sum(row.input_tokens for row in rows),
         )
+
+    @staticmethod
+    def _to_ip_block(row: IpBlockRule) -> IpBlockRecord:
+        return IpBlockRecord(
+            row.id, row.kind, row.value, row.note, row.created_by, row.created_at, row.hits, row.last_hit_at
+        )
+
+    async def ip_block_rules(self) -> list[IpBlockRecord]:
+        async with self.sessions() as session:
+            rows = (await session.scalars(select(IpBlockRule).order_by(IpBlockRule.id))).all()
+        return [self._to_ip_block(row) for row in rows]
+
+    async def add_ip_block_rule(self, kind: str, value: str, note: str, created_by: int | None) -> IpBlockRecord | None:
+        """规则已存在时返回 None。"""
+        statement = (
+            insert(IpBlockRule)
+            .values(kind=kind, value=value, note=note, created_by=created_by, created_at=datetime.now(), hits=0)
+            .on_conflict_do_nothing(index_elements=[IpBlockRule.kind, IpBlockRule.value])
+            .returning(IpBlockRule)
+        )
+        async with self.sessions.begin() as session:
+            row = await session.scalar(statement)
+            return None if row is None else self._to_ip_block(row)
+
+    async def delete_ip_block_rule(self, rule_id: int) -> IpBlockRecord | None:
+        async with self.sessions.begin() as session:
+            row = await session.get(IpBlockRule, rule_id)
+            if row is None:
+                return None
+            record = self._to_ip_block(row)
+            await session.delete(row)
+        return record
+
+    async def record_ip_block_hit(self, rule_id: int, when: datetime) -> None:
+        statement = (
+            update(IpBlockRule).where(IpBlockRule.id == rule_id).values(hits=IpBlockRule.hits + 1, last_hit_at=when)
+        )
+        async with self.sessions.begin() as session:
+            await session.execute(statement)

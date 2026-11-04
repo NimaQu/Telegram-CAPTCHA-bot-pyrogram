@@ -16,8 +16,10 @@ from fastapi import FastAPI
 from pyrogram.errors import ChannelPrivate, ChatAdminRequired, UserIdInvalid
 
 from captcha_bot import miniapp_admin
+from captcha_bot.asn import AsnInfo
 from captcha_bot.config import Settings
-from captcha_bot.db.repository import LogRecord
+from captcha_bot.db.repository import IpBlockRecord, LogRecord
+from captcha_bot.ipblock import IpCheck, RuleError
 
 
 def init_data(user_id: int, token: str) -> str:
@@ -158,3 +160,50 @@ async def test_admin_clean_runs_in_background(settings: Settings, monkeypatch: p
     context.repository.all_blacklist_user_ids.side_effect = RuntimeError("boom")
     await miniapp_admin._clean_and_report(context, admin_id)
     assert "失败" in context.client.send_message.await_args.args[1]
+
+
+def blocklist_context(context: Any) -> None:
+    rule = IpBlockRecord(1, "cidr", "108.187.4.0/24", "农场", 1, datetime(2026, 11, 4), 2, datetime(2026, 11, 4, 8))
+
+    async def add(text: str, note: str, created_by: int | None) -> IpBlockRecord:
+        if text == "bad":
+            raise RuleError("无法识别")
+        return rule
+
+    async def remove(text: str) -> IpBlockRecord | None:
+        return rule if text == "1" else None
+
+    context.ipblock = SimpleNamespace(
+        rules=AsyncMock(return_value=[rule]),
+        add=AsyncMock(side_effect=add),
+        remove=AsyncMock(side_effect=remove),
+        check=AsyncMock(side_effect=lambda ip: IpCheck(ip, AsnInfo(138995, "Spam"), rule)),
+        asn=SimpleNamespace(available=AsyncMock(return_value=False)),
+    )
+
+
+@pytest.mark.asyncio
+async def test_admin_ip_block_rules(settings: Settings) -> None:
+    app, context = admin_app(settings)
+    blocklist_context(context)
+    async with http(app) as client:
+        assert (await client.get("/miniapp/api/admin/ipblock", headers=headers(settings, 999))).status_code == 403
+        listed = (await client.get("/miniapp/api/admin/ipblock", headers=headers(settings))).json()
+        assert listed["asn_available"] is False
+        assert listed["rules"][0]["value"] == "108.187.4.0/24" and listed["rules"][0]["hits"] == 2
+
+        added = await client.post(
+            "/miniapp/api/admin/ipblock", headers=headers(settings), json={"rule": "108.187.4.79/24", "note": "农场"}
+        )
+        assert added.status_code == 200 and "#1" in added.json()["message"]
+        context.ipblock.add.assert_awaited_with("108.187.4.79/24", "农场", settings.bot.admin_ids[0])
+        bad = await client.post("/miniapp/api/admin/ipblock", headers=headers(settings), json={"rule": "bad"})
+        assert bad.status_code == 400 and "无法识别" in bad.json()["detail"]
+
+        assert (await client.delete("/miniapp/api/admin/ipblock/1", headers=headers(settings))).status_code == 200
+        assert (await client.delete("/miniapp/api/admin/ipblock/9", headers=headers(settings))).status_code == 404
+
+        checked = (await client.get("/miniapp/api/admin/ipblock/check/108.187.4.79", headers=headers(settings))).json()
+        assert checked["asn"] == "AS138995 Spam" and checked["rule"]["id"] == 1
+        invalid = await client.get("/miniapp/api/admin/ipblock/check/nope", headers=headers(settings))
+        assert invalid.status_code == 400

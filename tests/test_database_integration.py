@@ -230,3 +230,40 @@ async def test_repository_concurrent_upserts_and_log_deduplication(
         assert len(logs) == 1
     finally:
         await database.close()
+
+
+@pytest.mark.asyncio
+async def test_repository_ip_block_rules_and_reputation_switch(
+    database_config: tuple[str, Path, Config],
+) -> None:
+    _, config_path, _ = database_config
+    settings = load_settings(config_path)
+    database = Database(settings)
+    repository = Repository(database.sessions)
+    try:
+        await repository.set_group_config(-3003, "enable_ip_reputation", "false", settings.defaults)
+        overrides = await repository.get_group_overrides(-3003)
+        assert overrides is not None and not overrides.enable_ip_reputation and overrides.enable_global_blacklist
+        await repository.set_group_config(-3004, "challenge_timeout", "90", settings.defaults)
+        defaults = await repository.get_group_overrides(-3004)
+        assert defaults is not None and defaults.enable_ip_reputation
+
+        rule = await repository.add_ip_block_rule("cidr", "108.187.4.0/24", "农场", 7)
+        assert rule is not None and rule.hits == 0 and rule.note == "农场"
+        assert await repository.add_ip_block_rule("cidr", "108.187.4.0/24", "", None) is None
+        asn = await repository.add_ip_block_rule("asn", "138995", "", None)
+        assert asn is not None
+        await repository.record_ip_block_hit(rule.id, datetime(2026, 11, 4, 12))
+        await repository.record_ip_block_hit(rule.id, datetime(2026, 11, 4, 13))
+        stored = {item.id: item for item in await repository.ip_block_rules()}
+        assert stored[rule.id].hits == 2 and stored[rule.id].last_hit_at == datetime(2026, 11, 4, 13)
+        deleted = await repository.delete_ip_block_rule(asn.id)
+        assert deleted is not None and deleted.value == "138995"
+        assert await repository.delete_ip_block_rule(asn.id) is None
+        assert [item.id for item in await repository.ip_block_rules()] == [rule.id]
+
+        first = await repository.log_recaptcha("blk", 1, -3003, "1.2.3.4", "ua", RecaptchaLogAction.BLOCKED)
+        again = await repository.log_recaptcha("blk", 1, -3003, "1.2.3.4", "ua", RecaptchaLogAction.BLOCKED)
+        assert first and not again
+    finally:
+        await database.close()

@@ -134,6 +134,11 @@ class GeoIpSettings(StrictModel):
     # 留空则不显示 IP 归属地；相对路径以工作目录为准
     qqwry_path: str | None = "qqwry.dat"
     download_url: str = "https://github.com/metowolf/qqwry.dat/releases/latest/download/qqwry.dat"
+    # MaxMind GeoLite2-ASN 数据库，用于 IP 封锁中的 ASN 规则；留空或文件不存在时 ASN 规则不生效
+    asn_path: str | None = "GeoLite2-ASN.mmdb"
+    # `captcha-bot update-asn` 下载数据库用；填了 account_id 走新版下载接口，否则只用 license_key
+    maxmind_account_id: int | None = Field(default=None, strict=True)
+    maxmind_license_key: SecretStr | None = None
 
     @field_validator("download_url")
     @classmethod
@@ -178,6 +183,8 @@ class DefaultPolicy(StrictModel):
     delete_failed_challenge: bool = Field(default=True, strict=True)
     delete_failed_challenge_interval: int = Field(default=15, ge=0, le=3600, strict=True)
     enable_global_blacklist: bool = Field(default=True, strict=True)
+    # 网页验证时拒绝命中 IP 封锁规则(CIDR/ASN)的访问者；群管理员可在本群关闭
+    enable_ip_reputation: bool = Field(default=True, strict=True)
     global_timeout_user_blacklist_remove: int = Field(default=600, gt=0, strict=True)
 
 

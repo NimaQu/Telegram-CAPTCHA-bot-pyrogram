@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from pyrogram import Client
 
 from captcha_bot.antispam import AntispamService
+from captcha_bot.asn import AsnService
 from captcha_bot.challenges import ChallengeRegistry
 from captcha_bot.commands import sync_bot_commands
 from captcha_bot.config import ConfigStore, load_settings
@@ -25,6 +26,7 @@ from captcha_bot.handlers import (
     register_config_handlers,
     register_report_handlers,
 )
+from captcha_bot.ipblock import IpBlocklist
 from captcha_bot.jev import JevClient
 from captcha_bot.miniapp import register_miniapp_routes
 from captcha_bot.miniapp_admin import router as miniapp_admin_router
@@ -72,6 +74,7 @@ def create_app(config_path: str | Path = "config.toml") -> FastAPI:
                 model=antispam_settings.model,
                 timeout=antispam_settings.timeout_seconds,
             )
+            asn = AsnService(lambda: config.settings.geoip.asn_path)
             context = AppContext(
                 config=config,
                 database=database,
@@ -81,8 +84,9 @@ def create_app(config_path: str | Path = "config.toml") -> FastAPI:
                 policies=policies,
                 turnstile=TurnstileService(http, config),
                 client=client,
-                geoip=GeoIpService(lambda: config.settings.geoip.qqwry_path),
+                geoip=GeoIpService(lambda: config.settings.geoip.qqwry_path, asn),
                 antispam=AntispamService(config, repository, jev),
+                ipblock=IpBlocklist(repository, asn),
             )
             register_admin_handlers(client, context)
             register_challenge_handlers(client, context)

@@ -33,6 +33,11 @@ timeout_seconds = 10.0
 # 纯真 IP 库路径，用 `captcha-bot update-qqwry` 下载/更新；留空或文件不存在时不显示归属地
 qqwry_path = "qqwry.dat"
 download_url = "https://github.com/metowolf/qqwry.dat/releases/latest/download/qqwry.dat"
+# MaxMind GeoLite2-ASN 数据库，IP 封锁的 ASN 规则需要它；用 `captcha-bot update-asn` 下载/更新
+asn_path = "GeoLite2-ASN.mmdb"
+# 在 https://www.maxmind.com 注册后获取；填了 account_id 走新版下载接口
+# maxmind_account_id = 123456
+# maxmind_license_key = "replace-me"
 
 [antispam]
 # 按群 AI 反垃圾（TypeSafe jev），各群管理员在配置面板里填写自己的 token
@@ -59,6 +64,8 @@ delete_passed_challenge_interval = 15
 delete_failed_challenge = true
 delete_failed_challenge_interval = 15
 enable_global_blacklist = true
+# 网页验证时拒绝命中 IP 封锁规则的访问者，群管理员可在配置面板里关闭
+enable_ip_reputation = true
 global_timeout_user_blacklist_remove = 600
 
 [messages]

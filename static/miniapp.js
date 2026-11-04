@@ -97,6 +97,7 @@
             form.elements.challenge_failed_action.value = policy.challenge_failed_action;
             form.elements.challenge_timeout_action.value = policy.challenge_timeout_action;
             form.elements.enable_global_blacklist.checked = policy.enable_global_blacklist;
+            form.elements.enable_ip_reputation.checked = policy.enable_ip_reputation;
             const missing = [];
             if (!state.bot.can_delete_messages) missing.push("删除消息");
             if (!state.bot.can_restrict_members) missing.push("封禁/限制用户");
@@ -112,6 +113,7 @@
                 challenge_failed_action: form.elements.challenge_failed_action.value,
                 challenge_timeout_action: form.elements.challenge_timeout_action.value,
                 enable_global_blacklist: form.elements.enable_global_blacklist.checked,
+                enable_ip_reputation: form.elements.enable_ip_reputation.checked,
             };
             run(saveButton, async () => {
                 render(await api(`chats/${encodeURIComponent(chatId)}`, { method: "PUT", body: JSON.stringify(payload) }));
@@ -417,7 +419,75 @@
         }
     }
 
+    function renderBlockRules(container, rules, reload) {
+        container.replaceChildren();
+        if (rules.length === 0) {
+            container.append(element("p", "还没有封锁规则", "meta"));
+            return;
+        }
+        for (const rule of rules) {
+            const card = element("div", undefined, "record");
+            card.append(element("p", `#${rule.id} ${rule.value}${rule.note ? ` · ${rule.note}` : ""}`));
+            const lastHit = rule.last_hit_at ? formatTime(rule.last_hit_at) : "从未";
+            card.append(element("p", `命中 ${rule.hits} 次 · 最近 ${lastHit} · 添加于 ${formatTime(rule.created_at)}`, "meta"));
+            const remove = element("button", "删除", "danger");
+            remove.type = "button";
+            remove.addEventListener("click", async () => {
+                if (!(await confirmAction(`确定删除封锁规则 ${rule.value} 吗？`))) return;
+                run(remove, async () => {
+                    const result = await api(`admin/ipblock/${rule.id}`, { method: "DELETE" });
+                    await reload();
+                    return result.message;
+                });
+            });
+            card.append(remove);
+            container.append(card);
+        }
+    }
+
+    function setupBlocklist() {
+        const blockForm = document.getElementById("block-form");
+        const rulesContainer = document.getElementById("block-rules");
+        const asnWarning = document.getElementById("asn-unavailable");
+
+        async function reload() {
+            const result = await api("admin/ipblock", { method: "GET" });
+            asnWarning.hidden = result.asn_available || !result.rules.some((rule) => rule.kind === "asn");
+            renderBlockRules(rulesContainer, result.rules, reload);
+        }
+
+        blockForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            const payload = { rule: blockForm.elements.rule.value.trim(), note: blockForm.elements.note.value.trim() };
+            run(blockForm.querySelector("button"), async () => {
+                const result = await api("admin/ipblock", { method: "POST", body: JSON.stringify(payload) });
+                blockForm.reset();
+                await reload();
+                return result.message;
+            });
+        });
+
+        const checkForm = document.getElementById("block-check-form");
+        checkForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            const ip = checkForm.elements.ip.value.trim();
+            run(checkForm.querySelector("button"), async () => {
+                const result = await api(`admin/ipblock/check/${encodeURIComponent(ip)}`, { method: "GET" });
+                const container = document.getElementById("block-check-result");
+                container.replaceChildren(
+                    element("p", `归属地: ${result.location || "未知"}`, "meta"),
+                    element("p", `ASN: ${result.asn || "未知"}`, "meta"),
+                    element("p", result.rule ? `命中规则 #${result.rule.id} ${result.rule.value}` : "未命中任何规则"),
+                );
+                status.hidden = true;
+            });
+        });
+
+        reload().catch((error) => showStatus(error.message, "error"));
+    }
+
     function setupAdminView() {
+        setupBlocklist();
         const logsForm = document.getElementById("logs-form");
         logsForm.addEventListener("submit", (event) => {
             event.preventDefault();

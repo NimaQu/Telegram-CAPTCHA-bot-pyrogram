@@ -8,9 +8,11 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pyrogram.errors import ChatAdminRequired, MessageNotModified, RPCError
 
+from captcha_bot.challenges import ChallengeSession
 from captcha_bot.context import AppContext
 from captcha_bot.db.models import RecaptchaLogAction
 from captcha_bot.handlers.common import full_chat_permissions, send_log
+from captcha_bot.ipblock import describe
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +38,44 @@ def client_ip(request: Request, context: AppContext) -> str:
             except ValueError:
                 logger.warning("ignored invalid CF-Connecting-IP", extra={"peer": peer})
     return str(peer_address)
+
+
+async def blocked_by_ip(
+    context: AppContext, session: ChallengeSession, challenge_id: str, remote_ip: str, user_agent: str
+) -> bool:
+    """IP 命中封锁规则时只拒绝本次网页验证，会话保留，到时按超时逻辑处理。"""
+    policy = await context.policies.get(session.chat_id)
+    if not policy.enable_ip_reputation:
+        return False
+    try:
+        result = await context.ipblock.check(remote_ip)
+    except Exception:
+        # 封锁检查出错时放行，不影响正常验证
+        logger.exception("IP block check failed", extra={"challenge_id": challenge_id})
+        return False
+    rule = result.rule
+    if rule is None:
+        return False
+    first_hit = await context.repository.log_recaptcha(
+        challenge_id, session.user_id, session.chat_id, remote_ip, user_agent, RecaptchaLogAction.BLOCKED
+    )
+    if first_hit:
+        # 同一验证、同一 IP 重复提交只统计和通知一次
+        await context.ipblock.record_hit(rule)
+        note = f" {rule.note}" if rule.note else ""
+        await send_log(
+            context,
+            f"用户 [{session.user_id}](tg://user?id={session.user_id}) 在群组 {session.chat_title} "
+            f"(`{session.chat_id}`) 的网页验证被 IP 封锁拒绝\n"
+            f"IP: {await context.geoip.format(remote_ip)}\n"
+            f"规则: #{rule.id} `{describe(rule)}`{note}\n"
+            f"验证ID: `{challenge_id}`",
+        )
+    logger.info(
+        "blocked web verification by IP rule",
+        extra={"challenge_id": challenge_id, "rule_id": rule.id, "chat_id": session.chat_id},
+    )
+    return True
 
 
 def register_web_routes(app: FastAPI, templates: Jinja2Templates) -> None:
@@ -117,6 +157,13 @@ def register_web_routes(app: FastAPI, templates: Jinja2Templates) -> None:
                 user_agent,
                 RecaptchaLogAction.FAILED,
             )
+            return templates.TemplateResponse(
+                request=request,
+                name="recaptcha.html",
+                context={"sitekey": context.config.settings.turnstile.site_key, "error": "验证状态异常，请再试一次！"},
+            )
+        if await blocked_by_ip(context, session, challenge_id, remote_ip, user_agent):
+            # 与 Turnstile 失败的提示一致，不透露被封锁的原因
             return templates.TemplateResponse(
                 request=request,
                 name="recaptcha.html",

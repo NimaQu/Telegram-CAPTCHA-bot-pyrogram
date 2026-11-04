@@ -170,6 +170,7 @@ PAYLOAD = {
     "challenge_failed_action": "kick",
     "challenge_type": "recaptcha",
     "enable_global_blacklist": False,
+    "enable_ip_reputation": False,
 }
 
 
@@ -205,6 +206,7 @@ async def test_miniapp_reads_and_updates_config(settings: Settings) -> None:
         )
         assert invalid.status_code == 422
     context.repository.save_group_overrides.assert_awaited_once()
+    assert not context.repository.save_group_overrides.await_args.args[1].enable_ip_reputation
     context.client.send_message.assert_not_awaited()
 
 

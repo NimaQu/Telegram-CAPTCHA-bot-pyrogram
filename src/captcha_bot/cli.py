@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
 from alembic import command
+from captcha_bot.asn import download_geolite2_asn
 from captcha_bot.config import load_settings, migrate_legacy_config
 from captcha_bot.db.importer import import_csv
 from captcha_bot.db.legacy import migrate_database
@@ -49,6 +50,8 @@ def parser() -> argparse.ArgumentParser:
     importer.add_argument("--config", default="config.toml", type=Path)
     qqwry = subcommands.add_parser("update-qqwry", help="download or update the qqwry.dat IP location database")
     qqwry.add_argument("--config", default="config.toml", type=Path)
+    asn = subcommands.add_parser("update-asn", help="download or update the MaxMind GeoLite2-ASN database")
+    asn.add_argument("--config", default="config.toml", type=Path)
     return command_parser
 
 
@@ -123,6 +126,21 @@ def main(default_command: str | None = None) -> None:
                 raise ValueError("geoip.qqwry_path 未设置")
             version = _run_async(download_qqwry(geoip.download_url, geoip.qqwry_path))
             print(f"已更新 {geoip.qqwry_path}：{version}；运行中的机器人会自动加载新文件")
+            return
+        if args.command == "update-asn":
+            geoip = load_settings(args.config).geoip
+            if not geoip.asn_path:
+                raise ValueError("geoip.asn_path 未设置")
+            if geoip.maxmind_license_key is None:
+                raise ValueError("geoip.maxmind_license_key 未设置")
+            version = _run_async(
+                download_geolite2_asn(
+                    geoip.maxmind_license_key.get_secret_value(),
+                    geoip.asn_path,
+                    account_id=geoip.maxmind_account_id,
+                )
+            )
+            print(f"已更新 {geoip.asn_path}：构建于 {version}；运行中的机器人会自动加载新文件")
             return
         if args.command == "run":
             from captcha_bot.app import create_app

@@ -81,6 +81,7 @@ class PolicyPayload(BaseModel):
     challenge_failed_action: FailedAction
     challenge_type: ChallengeType
     enable_global_blacklist: bool = Field(strict=True)
+    enable_ip_reputation: bool = Field(default=True, strict=True)
 
     @classmethod
     def from_policy(cls, policy: DefaultPolicy) -> PolicyPayload:
@@ -90,6 +91,7 @@ class PolicyPayload(BaseModel):
             challenge_failed_action=policy.challenge_failed_action,
             challenge_type=policy.challenge_type,
             enable_global_blacklist=policy.enable_global_blacklist,
+            enable_ip_reputation=policy.enable_ip_reputation,
         )
 
     def to_overrides(self) -> GroupOverrides:
@@ -99,6 +101,7 @@ class PolicyPayload(BaseModel):
             challenge_failed_action=self.challenge_failed_action,
             challenge_type=self.challenge_type,
             enable_global_blacklist=self.enable_global_blacklist,
+            enable_ip_reputation=self.enable_ip_reputation,
         )
 
 

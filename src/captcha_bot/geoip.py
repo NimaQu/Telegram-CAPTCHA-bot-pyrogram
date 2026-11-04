@@ -9,8 +9,12 @@ import struct
 from collections.abc import Callable
 from ipaddress import IPv4Address, ip_address
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
+
+if TYPE_CHECKING:
+    from captcha_bot.asn import AsnService
 
 logger = logging.getLogger(__name__)
 
@@ -96,8 +100,9 @@ class QQWry:
 class GeoIpService:
     """按需加载 qqwry.dat，文件被替换后自动重新加载，无需重启。"""
 
-    def __init__(self, path: Callable[[], str | None]) -> None:
+    def __init__(self, path: Callable[[], str | None], asn: AsnService | None = None) -> None:
         self._path = path
+        self.asn = asn
         self._loaded: tuple[str, int] | None = None
         self._database: QQWry | None = None
         self._lock = asyncio.Lock()
@@ -134,8 +139,12 @@ class GeoIpService:
 
     async def format(self, ip: str) -> str:
         """Telegram 中点击 inline code 即可复制 IP。"""
-        location = await self.lookup(ip)
-        return f"`{ip}` ({location})" if location else f"`{ip}`"
+        parts = [await self.lookup(ip)]
+        if self.asn is not None:
+            info = await self.asn.lookup(ip)
+            parts.append(str(info) if info else None)
+        details = ", ".join(part for part in parts if part)
+        return f"`{ip}` ({details})" if details else f"`{ip}`"
 
 
 async def download_qqwry(

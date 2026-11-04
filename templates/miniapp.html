@@ -67,7 +67,12 @@
                     <span>启用全局黑名单</span>
                     <input name="enable_global_blacklist" type="checkbox">
                 </label>
+                <label class="row">
+                    <span>IP 声誉检测</span>
+                    <input name="enable_ip_reputation" type="checkbox">
+                </label>
             </section>
+            <p class="hint" id="ip-reputation-hint">网页验证时拒绝来自已知打码农场 IP 段/ASN 的访问者，被拒绝的用户按超时处理。仅对 Turnstile 网页验证有效。</p>
 
             <button type="submit" id="save">保存</button>
         </form>
@@ -182,6 +187,27 @@
             </div>
             <button type="submit">查询通过验证的用户</button>
             <div class="results" id="ip-results"></div>
+        </form>
+
+        <h2>IP 封锁</h2>
+        <p class="hint">网页验证时拒绝命中规则的 IP，只影响之后的验证。各群管理员可以在群组配置里关闭。</p>
+        <p class="status warning" id="asn-unavailable" hidden>没有可用的 ASN 数据库，ASN 规则暂不生效，请运行 captcha-bot update-asn。</p>
+        <form class="group stack" id="block-form">
+            <div class="row">
+                <input name="rule" type="text" required maxlength="64" placeholder="CIDR 或 ASN，例如 108.187.4.0/24、AS138995" autocomplete="off">
+            </div>
+            <div class="row">
+                <input name="note" type="text" maxlength="200" placeholder="备注(可选)" autocomplete="off">
+            </div>
+            <button type="submit">添加规则</button>
+            <div class="results" id="block-rules"></div>
+        </form>
+        <form class="group stack" id="block-check-form">
+            <div class="row">
+                <input name="ip" type="text" required placeholder="检查 IP，例如 108.187.4.79" autocomplete="off">
+            </div>
+            <button type="submit" class="secondary">检查</button>
+            <div class="results" id="block-check-result"></div>
         </form>
 
         <h2>离开群组</h2>

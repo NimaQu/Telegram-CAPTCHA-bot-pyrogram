@@ -108,6 +108,7 @@ async def test_group_config_parsing_and_immediate_reads(settings: Settings) -> N
         failed_action="kick",
         challenge_type="recaptcha",
         global_blacklist=False,
+        ip_reputation=True,
     )
     overrides = await repository.get_group_overrides(-1)
     assert overrides is not None and overrides.challenge_timeout == 90 and not overrides.enable_global_blacklist

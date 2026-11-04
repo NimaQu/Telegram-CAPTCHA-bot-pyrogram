@@ -162,3 +162,33 @@ async def test_application_lifespan_owns_resources(monkeypatch) -> None:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=application), base_url="http://test") as client:
             assert (await client.get("/")).status_code == 200
     assert not application.state.context.client.is_connected
+
+
+def test_cli_update_asn(tmp_path: Path, monkeypatch, capsys) -> None:
+    with Path("config.example.toml").open("rb") as source:
+        data = tomllib.load(source)
+    data["geoip"]["asn_path"] = str(tmp_path / "asn.mmdb")
+    config = tmp_path / "config.toml"
+    config.write_text(tomli_w.dumps(data), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["captcha-bot", "update-asn", "--config", str(config)])
+    with pytest.raises(SystemExit, match="maxmind_license_key"):
+        cli.main()
+
+    data["geoip"]["maxmind_license_key"] = "secret"
+    data["geoip"]["maxmind_account_id"] = 42
+    config.write_text(tomli_w.dumps(data), encoding="utf-8")
+    calls: list[tuple[Any, ...]] = []
+
+    async def fake_download(license_key: str, path: str, *, account_id: int | None = None) -> str:
+        calls.append((license_key, path, account_id))
+        return "2026-11-03"
+
+    monkeypatch.setattr(cli, "download_geolite2_asn", fake_download)
+    cli.main()
+    assert calls == [("secret", str(tmp_path / "asn.mmdb"), 42)]
+    assert "2026-11-03" in capsys.readouterr().out
+
+    data["geoip"]["asn_path"] = ""
+    config.write_text(tomli_w.dumps(data), encoding="utf-8")
+    with pytest.raises(SystemExit, match="asn_path"):
+        cli.main()

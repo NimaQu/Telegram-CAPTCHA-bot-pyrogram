@@ -13,7 +13,7 @@ from pyrogram.types import LinkPreviewOptions, Message, MessageOriginHiddenUser,
 
 from captcha_bot import admin_ops
 from captcha_bot.context import AppContext
-from captcha_bot.db.repository import LogRecord
+from captcha_bot.db.repository import IpBlockRecord, LogRecord
 from captcha_bot.handlers.common import (
     ChatUnavailable,
     can_restrict_members,
@@ -24,6 +24,7 @@ from captcha_bot.handlers.common import (
     split_long_message,
     valid_ip,
 )
+from captcha_bot.ipblock import RuleError, describe
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +131,7 @@ async def set_config(context: AppContext, client: Client, message: Message) -> N
         await message.reply(
             "使用方法:\n/faset [配置项] [值]\n\n"
             "配置项: challenge_failed_action, challenge_timeout_action, challenge_timeout, "
-            "challenge_type, enable_global_blacklist"
+            "challenge_type, enable_global_blacklist, enable_ip_reputation"
         )
         return
     try:
@@ -243,6 +244,81 @@ async def ban_user_by_ip(context: AppContext, client: Client, message: Message) 
         await message.reply(chunk)
 
 
+def format_rule(rule: IpBlockRecord) -> str:
+    text = f"#{rule.id} `{describe(rule)}`"
+    if rule.note:
+        text += f" {rule.note}"
+    last_hit = rule.last_hit_at.strftime("%Y-%m-%d %H:%M") if rule.last_hit_at else "从未"
+    return f"{text}\n  命中 {rule.hits} 次，最近: {last_hit}"
+
+
+async def block_ip(context: AppContext, _client: Client, message: Message) -> None:
+    if message.from_user is None or not is_bot_admin(context, message.from_user.id) or not message.text:
+        return
+    arguments = message.text.split(maxsplit=2)
+    if len(arguments) < 2:
+        await message.reply(
+            "使用方法: /blockip [CIDR|ASN] [备注]\n"
+            "例如: `/blockip 108.187.4.0/24 打码农场` 或 `/blockip AS138995`\n"
+            "只影响之后的网页验证，已通过的用户不受影响。"
+        )
+        return
+    try:
+        rule = await context.ipblock.add(
+            arguments[1], arguments[2] if len(arguments) == 3 else "", message.from_user.id
+        )
+    except RuleError as exc:
+        await message.reply(str(exc))
+        return
+    logger.info("IP block rule added", extra={"admin_id": message.from_user.id, "rule_id": rule.id})
+    text = f"已添加封锁规则 #{rule.id} `{describe(rule)}`"
+    if rule.kind == "asn" and not await context.ipblock.asn.available():
+        text += "\n注意: 当前没有可用的 ASN 数据库，ASN 规则暂不生效，请运行 `captcha-bot update-asn`"
+    await message.reply(text)
+
+
+async def unblock_ip(context: AppContext, _client: Client, message: Message) -> None:
+    if message.from_user is None or not is_bot_admin(context, message.from_user.id):
+        return
+    if not message.command or len(message.command) != 2:
+        await message.reply("使用方法: /unblockip [规则ID|CIDR|ASN]\n例如: `/unblockip 3` 或 `/unblockip AS138995`")
+        return
+    try:
+        rule = await context.ipblock.remove(message.command[1])
+    except RuleError as exc:
+        await message.reply(str(exc))
+        return
+    if rule is None:
+        await message.reply("没有找到这条规则")
+        return
+    logger.info("IP block rule removed", extra={"admin_id": message.from_user.id, "rule_id": rule.id})
+    await message.reply(f"已删除封锁规则 #{rule.id} `{describe(rule)}`")
+
+
+async def block_list(context: AppContext, _client: Client, message: Message) -> None:
+    if message.from_user is None or not is_bot_admin(context, message.from_user.id):
+        return
+    rules = await context.ipblock.rules()
+    if not rules:
+        await message.reply("还没有 IP 封锁规则，使用 /blockip 添加")
+        return
+    text = f"IP 封锁规则共 {len(rules)} 条:\n\n" + "\n".join(format_rule(rule) for rule in rules)
+    for chunk in split_long_message(text):
+        await message.reply(chunk)
+
+
+async def check_ip(context: AppContext, _client: Client, message: Message) -> None:
+    if message.from_user is None or not is_bot_admin(context, message.from_user.id):
+        return
+    if not message.command or len(message.command) != 2 or not valid_ip(message.command[1]):
+        await message.reply("使用方法: /checkip [ip]\n例如: `/checkip 108.187.4.79`")
+        return
+    ip_addr = message.command[1]
+    result = await context.ipblock.check(ip_addr)
+    verdict = f"命中规则 {format_rule(result.rule)}" if result.rule else "未命中任何封锁规则"
+    await message.reply(f"IP {await context.geoip.format(ip_addr)}\n{verdict}")
+
+
 async def forwarded_user_record(context: AppContext, _client: Client, message: Message) -> None:
     if message.from_user is None or not is_bot_admin(context, message.from_user.id):
         return
@@ -270,6 +346,10 @@ def register_admin_handlers(client: Client, context: AppContext) -> None:
         (get_log, filters.command("getlog") & filters.private),
         (get_user_by_ip, filters.command("getuserbyip") & filters.private),
         (ban_user_by_ip, filters.command("banuserbyip") & filters.private),
+        (block_ip, filters.command("blockip") & filters.private),
+        (unblock_ip, filters.command("unblockip") & filters.private),
+        (block_list, filters.command("blocklist") & filters.private),
+        (check_ip, filters.command("checkip") & filters.private),
         (forwarded_user_record, filters.forwarded & filters.private),
     ]
     for callback, handler_filter in handlers:

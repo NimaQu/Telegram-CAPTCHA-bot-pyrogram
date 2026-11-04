@@ -1,4 +1,4 @@
-"""Mini App 中的 Bot 管理员接口，对应 /reload、/leave、/clean、/getlog、/getuserbyip、/banuserbyip 及转发查询。"""
+"""Mini App 中的 Bot 管理员接口：重载、离开群组、清理、验证记录、按 IP 查询/封禁、IP 封锁规则及转发查询。"""
 
 from __future__ import annotations
 
@@ -11,8 +11,9 @@ from pyrogram.errors import ChatAdminRequired, RPCError
 
 from captcha_bot import admin_ops
 from captcha_bot.context import AppContext
-from captcha_bot.db.repository import LogRecord
+from captcha_bot.db.repository import IpBlockRecord, LogRecord
 from captcha_bot.handlers.common import is_bot_admin, schedule, valid_ip
+from captcha_bot.ipblock import MAX_NOTE_LENGTH, RuleError, describe
 from captcha_bot.miniapp import WebAppUser, authenticate
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,13 @@ class BanPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     group_id: int = Field(lt=0, strict=True)
+
+
+class BlockRulePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rule: str = Field(min_length=1, max_length=64)
+    note: str = Field(default="", max_length=MAX_NOTE_LENGTH)
 
 
 def _context(request: Request) -> AppContext:
@@ -167,4 +175,62 @@ async def ban_by_ip(
     return {
         "success": result.success,
         "failures": [{"user_id": user_id, "error": error} for user_id, error in result.failures],
+    }
+
+
+def _rule_json(rule: IpBlockRecord) -> dict[str, object]:
+    return {
+        "id": rule.id,
+        "kind": rule.kind,
+        "value": describe(rule),
+        "note": rule.note,
+        "hits": rule.hits,
+        "created_at": rule.created_at.isoformat(),
+        "last_hit_at": rule.last_hit_at.isoformat() if rule.last_hit_at else None,
+    }
+
+
+@router.get("/ipblock")
+async def list_block_rules(request: Request, authorization: AuthHeader = None) -> dict[str, object]:
+    require_bot_admin(request, authorization)
+    ipblock = _context(request).ipblock
+    return {
+        "rules": [_rule_json(rule) for rule in await ipblock.rules()],
+        "asn_available": await ipblock.asn.available(),
+    }
+
+
+@router.post("/ipblock")
+async def add_block_rule(
+    request: Request, payload: BlockRulePayload, authorization: AuthHeader = None
+) -> dict[str, object]:
+    user = require_bot_admin(request, authorization)
+    try:
+        rule = await _context(request).ipblock.add(payload.rule, payload.note, user.id)
+    except RuleError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    logger.info("IP block rule added via Mini App", extra={"admin_id": user.id, "rule_id": rule.id})
+    return {"rule": _rule_json(rule), "message": f"已添加封锁规则 #{rule.id} {describe(rule)}"}
+
+
+@router.delete("/ipblock/{rule_id}")
+async def delete_block_rule(request: Request, rule_id: int, authorization: AuthHeader = None) -> dict[str, object]:
+    user = require_bot_admin(request, authorization)
+    rule = await _context(request).ipblock.remove(str(rule_id))
+    if rule is None:
+        raise HTTPException(404, "没有找到这条规则")
+    logger.info("IP block rule removed via Mini App", extra={"admin_id": user.id, "rule_id": rule.id})
+    return {"message": f"已删除封锁规则 #{rule.id} {describe(rule)}"}
+
+
+@router.get("/ipblock/check/{ip_addr}")
+async def check_block_ip(request: Request, ip_addr: str, authorization: AuthHeader = None) -> dict[str, object]:
+    require_bot_admin(request, authorization)
+    context = _context(request)
+    result = await context.ipblock.check(_checked_ip(ip_addr))
+    return {
+        "ip": ip_addr,
+        "location": await context.geoip.lookup(ip_addr),
+        "asn": str(result.asn) if result.asn else None,
+        "rule": _rule_json(result.rule) if result.rule else None,
     }

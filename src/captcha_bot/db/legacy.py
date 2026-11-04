@@ -20,6 +20,13 @@ from captcha_bot.db.models import BlacklistUser, GroupConfig, RecaptchaLog
 
 TABLES = tuple(cast(Table, model.__table__) for model in (BlacklistUser, GroupConfig, RecaptchaLog))
 LOG_KEY = ("challenge_id", "user_id", "group_id", "ip_addr", "action")
+# master 分支之后新增、旧库里没有的字段，迁移时使用目标库的默认值
+NEW_COLUMNS = {"group_config": {"ip_reputation"}}
+
+
+def _legacy_columns(table: Table) -> list[str]:
+    skipped = NEW_COLUMNS.get(table.name, set())
+    return [name for name in table.columns.keys() if name not in skipped]
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,7 +70,7 @@ def _source_tables(connection: Connection) -> dict[str, Table]:
         if not inspector.has_table(target.name):
             raise ValueError(f"旧数据库不符合 master 结构：缺少表 {target.name}")
         columns = {column["name"] for column in inspector.get_columns(target.name)}
-        required = set(target.columns.keys())
+        required = set(_legacy_columns(target))
         if target.name == "group_config":
             required.add("third_party_blacklist")
         if not required <= columns:
@@ -91,7 +98,7 @@ def _transfer(source: Connection, target: Connection, batch_size: int) -> dict[s
     counts: dict[str, TransferCount] = {}
     for table in TABLES:
         legacy = source_tables[table.name]
-        fields = [name for name in table.columns.keys() if table.name != "recaptcha_log" or name != "id"]
+        fields = [name for name in _legacy_columns(table) if table.name != "recaptcha_log" or name != "id"]
         statement = select(*(legacy.c[name] for name in fields)).order_by(*legacy.primary_key.columns)
         key = LOG_KEY if table.name == "recaptcha_log" else tuple(column.name for column in table.primary_key)
         upsert = insert(table).on_conflict_do_nothing(index_elements=list(key))
