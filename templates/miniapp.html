@@ -74,6 +74,14 @@
             </section>
             <p class="hint" id="ip-reputation-hint">网页验证时拒绝来自已知打码农场 IP 段/ASN 的访问者，被拒绝的用户按超时处理。仅对 Turnstile 网页验证有效。</p>
 
+            <section class="group">
+                <label class="row">
+                    <span>拦截群外 bot</span>
+                    <input name="block_guest_bots" type="checkbox">
+                </label>
+            </section>
+            <p class="hint">有人 @ 不在本群的 bot 让它代发消息时，删除 bot 的回复，封禁召唤者和该 bot。管理员召唤的不处理。开启后本群成员将无法正常使用这类 bot。</p>
+
             <button type="submit" id="save">保存</button>
         </form>
         </div>

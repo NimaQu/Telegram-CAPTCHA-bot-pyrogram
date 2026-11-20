@@ -45,6 +45,7 @@ class GroupConfig(Base):
     timeout_action: Mapped[str] = mapped_column(String(10), nullable=False, default="kick")
     global_blacklist: Mapped[bool] = mapped_column(nullable=False, default=True)
     ip_reputation: Mapped[bool] = mapped_column(nullable=False, default=True, server_default="1")
+    guest_bot_block: Mapped[bool] = mapped_column(nullable=False, default=True, server_default="1")
 
 
 class IpBlockRule(Base):

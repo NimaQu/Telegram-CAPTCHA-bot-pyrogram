@@ -2,6 +2,7 @@ from captcha_bot.handlers.admin import register_admin_handlers
 from captcha_bot.handlers.antispam import register_antispam_handlers
 from captcha_bot.handlers.challenge import register_challenge_handlers
 from captcha_bot.handlers.config import register_config_handlers
+from captcha_bot.handlers.guestbot import register_guest_bot_handlers
 from captcha_bot.handlers.report import register_report_handlers
 
 __all__ = [
@@ -9,5 +10,6 @@ __all__ = [
     "register_antispam_handlers",
     "register_challenge_handlers",
     "register_config_handlers",
+    "register_guest_bot_handlers",
     "register_report_handlers",
 ]

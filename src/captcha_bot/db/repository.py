@@ -41,6 +41,7 @@ class GroupOverrides:
     challenge_type: ChallengeType
     enable_global_blacklist: bool
     enable_ip_reputation: bool = True
+    block_guest_bots: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +248,7 @@ class Repository:
                 challenge_type=ChallengeType(group.challenge_type),
                 enable_global_blacklist=group.global_blacklist,
                 enable_ip_reputation=group.ip_reputation,
+                block_guest_bots=group.guest_bot_block,
             )
 
     async def save_group_overrides(self, group_id: int, overrides: GroupOverrides) -> None:
@@ -257,6 +259,7 @@ class Repository:
             "timeout_action": overrides.challenge_timeout_action.value,
             "global_blacklist": overrides.enable_global_blacklist,
             "ip_reputation": overrides.enable_ip_reputation,
+            "guest_bot_block": overrides.block_guest_bots,
         }
         statement = insert(GroupConfig).values(chat_id=group_id, **values)
         statement = statement.on_conflict_do_update(index_elements=[GroupConfig.chat_id], set_=values)

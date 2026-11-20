@@ -38,6 +38,7 @@ def _override_values(override: GroupOverrides) -> dict[str, object]:
         "challenge_type": override.challenge_type,
         "enable_global_blacklist": override.enable_global_blacklist,
         "enable_ip_reputation": override.enable_ip_reputation,
+        "block_guest_bots": override.block_guest_bots,
     }
 
 

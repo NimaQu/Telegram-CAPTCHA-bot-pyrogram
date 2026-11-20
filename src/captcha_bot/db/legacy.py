@@ -21,7 +21,7 @@ from captcha_bot.db.models import BlacklistUser, GroupConfig, RecaptchaLog
 TABLES = tuple(cast(Table, model.__table__) for model in (BlacklistUser, GroupConfig, RecaptchaLog))
 LOG_KEY = ("challenge_id", "user_id", "group_id", "ip_addr", "action")
 # master 分支之后新增、旧库里没有的字段，迁移时使用目标库的默认值
-NEW_COLUMNS = {"group_config": {"ip_reputation"}}
+NEW_COLUMNS = {"group_config": {"ip_reputation", "guest_bot_block"}}
 
 
 def _legacy_columns(table: Table) -> list[str]:

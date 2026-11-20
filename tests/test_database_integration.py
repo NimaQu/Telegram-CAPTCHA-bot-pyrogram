@@ -231,14 +231,16 @@ async def test_repository_ip_block_rules_and_reputation_switch(
     database = Database(settings)
     repository = Repository(database.sessions)
     try:
-        switched_off = GroupOverrides(90, FailedAction.KICK, FailedAction.KICK, ChallengeType.RECAPTCHA, True, False)
+        switched_off = GroupOverrides(
+            90, FailedAction.KICK, FailedAction.KICK, ChallengeType.RECAPTCHA, True, False, False
+        )
         await repository.save_group_overrides(-3003, switched_off)
         assert await repository.get_group_overrides(-3003) == switched_off
         await repository.save_group_overrides(
             -3004, GroupOverrides(90, FailedAction.KICK, FailedAction.KICK, ChallengeType.MATH, True)
         )
         defaults = await repository.get_group_overrides(-3004)
-        assert defaults is not None and defaults.enable_ip_reputation
+        assert defaults is not None and defaults.enable_ip_reputation and defaults.block_guest_bots
 
         rule = await repository.add_ip_block_rule("cidr", "108.187.4.0/24", "农场", 7)
         assert rule is not None and rule.hits == 0 and rule.note == "农场"

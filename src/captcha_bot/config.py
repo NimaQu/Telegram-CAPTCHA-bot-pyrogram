@@ -185,6 +185,8 @@ class DefaultPolicy(StrictModel):
     enable_global_blacklist: bool = Field(default=True, strict=True)
     # 网页验证时拒绝命中 IP 封锁规则(CIDR/ASN)的访问者；群管理员可在本群关闭
     enable_ip_reputation: bool = Field(default=True, strict=True)
+    # 群里出现群外 guest bot 的回复时，删除并封禁召唤者和该 bot；群管理员可在本群关闭
+    block_guest_bots: bool = Field(default=True, strict=True)
     global_timeout_user_blacklist_remove: int = Field(default=600, gt=0, strict=True)
 
 

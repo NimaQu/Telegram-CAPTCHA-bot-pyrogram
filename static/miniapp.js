@@ -98,6 +98,7 @@
             form.elements.challenge_timeout_action.value = policy.challenge_timeout_action;
             form.elements.enable_global_blacklist.checked = policy.enable_global_blacklist;
             form.elements.enable_ip_reputation.checked = policy.enable_ip_reputation;
+            form.elements.block_guest_bots.checked = policy.block_guest_bots;
             const missing = [];
             if (!state.bot.can_delete_messages) missing.push("删除消息");
             if (!state.bot.can_restrict_members) missing.push("封禁/限制用户");
@@ -114,6 +115,7 @@
                 challenge_timeout_action: form.elements.challenge_timeout_action.value,
                 enable_global_blacklist: form.elements.enable_global_blacklist.checked,
                 enable_ip_reputation: form.elements.enable_ip_reputation.checked,
+                block_guest_bots: form.elements.block_guest_bots.checked,
             };
             run(saveButton, async () => {
                 render(await api(`chats/${encodeURIComponent(chatId)}`, { method: "PUT", body: JSON.stringify(payload) }));

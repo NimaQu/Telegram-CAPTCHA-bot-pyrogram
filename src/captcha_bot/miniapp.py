@@ -82,6 +82,7 @@ class PolicyPayload(BaseModel):
     challenge_type: ChallengeType
     enable_global_blacklist: bool = Field(strict=True)
     enable_ip_reputation: bool = Field(default=True, strict=True)
+    block_guest_bots: bool = Field(default=True, strict=True)
 
     @classmethod
     def from_policy(cls, policy: DefaultPolicy) -> PolicyPayload:
@@ -92,6 +93,7 @@ class PolicyPayload(BaseModel):
             challenge_type=policy.challenge_type,
             enable_global_blacklist=policy.enable_global_blacklist,
             enable_ip_reputation=policy.enable_ip_reputation,
+            block_guest_bots=policy.block_guest_bots,
         )
 
     def to_overrides(self) -> GroupOverrides:
@@ -102,6 +104,7 @@ class PolicyPayload(BaseModel):
             challenge_type=self.challenge_type,
             enable_global_blacklist=self.enable_global_blacklist,
             enable_ip_reputation=self.enable_ip_reputation,
+            block_guest_bots=self.block_guest_bots,
         )
 
 

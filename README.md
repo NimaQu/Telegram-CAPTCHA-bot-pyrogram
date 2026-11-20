@@ -147,6 +147,19 @@ uv run captcha-bot update-asn --config config.toml
 
 文件原子替换到 `[geoip].asn_path`，运行中的机器人会自动重新加载。MaxMind 每周二、五更新，可以用 cron 定期执行。数据库不存在时 ASN 规则不生效，CIDR 规则照常工作。
 
+## 拦截群外 guest bot
+
+Bot API 10.0 起，用户可以在群里 @ 一个不在群里的 bot（Guest Mode），由它代发一条回复，目前主要被用来刷广告。Bot 收到带召唤者（`guest_bot_caller_user` / `guest_bot_caller_chat`）的 guest 回复时：
+
+1. 删除这条回复；
+2. 封禁召唤者（频道身份就封该频道）。Bot 不能调用 `deleteParticipantHistory`，召唤者之前的消息不会被删除；
+3. 尝试封禁该 bot；
+4. 召唤者是群管理员、匿名管理员或本群关联频道时不处理。
+
+处置结果写入日志频道（`#GUEST_BOT`），群里发一条 60 秒后自动删除的提示。同一召唤者 5 分钟内只处置一次，同一条消息召唤的其他 bot 只删回复、封 bot。
+
+前提：在 BotFather 里为本 Bot 打开 **Bot-to-Bot Communication Mode**，并且 Bot 是群管理员，否则收不到其他 bot 的消息。默认对所有群生效（`[defaults].block_guest_bots`），群管理员可以在 `/config` 面板里关闭本群的「拦截群外 bot」。
+
 ## 命令菜单
 
 Bot 启动时会自动设置命令菜单，无需在 BotFather 中 `/setcommands`：群聊显示 `/config`、`/help`，私聊显示 `/config`、`/sender`；`admin_ids` 中的管理员在与 Bot 的私聊里额外看到 `/admin`、`/reload`、`/clean`、`/ping`。管理员需要先私聊过 Bot，否则无法为其设置专属菜单（日志中会有警告，私聊 Bot 后重启即可）。

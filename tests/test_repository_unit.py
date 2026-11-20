@@ -109,9 +109,11 @@ async def test_group_config_parsing_and_immediate_reads(settings: Settings) -> N
         challenge_type="recaptcha",
         global_blacklist=False,
         ip_reputation=True,
+        guest_bot_block=False,
     )
     overrides = await repository.get_group_overrides(-1)
     assert overrides is not None and overrides.challenge_timeout == 90 and not overrides.enable_global_blacklist
+    assert not overrides.block_guest_bots
 
 
 @pytest.mark.asyncio

@@ -66,6 +66,8 @@ delete_failed_challenge_interval = 15
 enable_global_blacklist = true
 # 网页验证时拒绝命中 IP 封锁规则的访问者，群管理员可在配置面板里关闭
 enable_ip_reputation = true
+# 群里有人召唤不在群里的 guest bot 时，删除 bot 的回复、封禁召唤者，同时尝试封禁该 bot
+block_guest_bots = true
 global_timeout_user_blacklist_remove = 600
 
 [messages]
@@ -86,6 +88,7 @@ self_introduction = """
 • 入群验证：新成员需要在限定时间内完成验证（数学题或网页验证），答错或超时会被移出群组
 • 全局黑名单：验证超时的账号短时间内再次入群会被直接移出，所有群通用
 • IP 封锁：拒绝来自已知打码农场 IP 段的网页验证
+• 拦截群外 bot：有人 @ 不在本群的 bot 代发广告时，删除消息并封禁召唤者和该 bot
 • AI 反垃圾（可选）：检查新成员通过验证后的第一条消息，自动处理广告和垃圾信息
 • 举报投票：群成员可以发起举报，票数够了交给 AI 判断
 
