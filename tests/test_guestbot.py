@@ -20,7 +20,14 @@ def user(user_id: int, *, is_bot: bool = False, username: str | None = None) -> 
     return SimpleNamespace(id=user_id, first_name=f"u{user_id}", last_name=None, username=username, is_bot=is_bot)
 
 
-def message(message_id: int, *, sender: Any = None, caller_user: Any = None, caller_chat: Any = None) -> Any:
+def message(
+    message_id: int,
+    *,
+    sender: Any = None,
+    caller_user: Any = None,
+    caller_chat: Any = None,
+    reply_to: Any = None,
+) -> Any:
     return SimpleNamespace(
         id=message_id,
         chat=SimpleNamespace(id=CHAT_ID, title="My group"),
@@ -29,7 +36,8 @@ def message(message_id: int, *, sender: Any = None, caller_user: Any = None, cal
         guest_bot_caller_chat=caller_chat,
         text="点我头像项目一单给500",
         caption=None,
-        delete=AsyncMock(),
+        reply_to_message=reply_to,
+        sender_chat=None,
     )
 
 
@@ -40,6 +48,7 @@ def make_context(settings: Settings, *, enabled: bool = True, caller_status: Any
         return SimpleNamespace(status=caller_status, privileges=None)
 
     client = SimpleNamespace(
+        delete_messages=AsyncMock(),
         ban_chat_member=AsyncMock(),
         get_chat_member=AsyncMock(side_effect=get_chat_member),
         get_chat=AsyncMock(return_value=SimpleNamespace(linked_chat=SimpleNamespace(id=-100777))),
@@ -83,11 +92,12 @@ async def test_guest_reply_bans_caller_and_bot(settings: Settings, monkeypatch: 
     client = context.client
     state = guestbot.GuestBotState()
     caller = user(CALLER_ID, username="pink")
-    reply = message(13, sender=user(BOT_ID, is_bot=True, username="smwoobot"), caller_user=caller)
+    summon = message(12, sender=caller)
+    reply = message(13, sender=user(BOT_ID, is_bot=True, username="smwoobot"), caller_user=caller, reply_to=summon)
 
     await guestbot.block_guest_reply(context, state, client, reply)
 
-    reply.delete.assert_awaited_once()
+    client.delete_messages.assert_awaited_once_with(CHAT_ID, [13, 12])
     client.ban_chat_member.assert_any_await(CHAT_ID, CALLER_ID)
     client.ban_chat_member.assert_any_await(CHAT_ID, BOT_ID)
     assert "#GUEST_BOT" in logs[0] and "@pink" in logs[0] and "@smwoobot" in logs[0]
@@ -96,9 +106,9 @@ async def test_guest_reply_bans_caller_and_bot(settings: Settings, monkeypatch: 
     # 同一次召唤的第二个 bot：只删回复、封 bot，不重复处置召唤者
     client.ban_chat_member.reset_mock()
     client.send_message.reset_mock()
-    second = message(14, sender=user(901, is_bot=True), caller_user=caller)
+    second = message(14, sender=user(901, is_bot=True), caller_user=caller, reply_to=summon)
     await guestbot.block_guest_reply(context, state, client, second)
-    second.delete.assert_awaited_once()
+    client.delete_messages.assert_awaited_with(CHAT_ID, [14, 12])
     client.ban_chat_member.assert_awaited_once_with(CHAT_ID, 901)
     client.send_message.assert_not_awaited()
     assert len(logs) == 1
@@ -113,7 +123,7 @@ async def test_guest_reply_ignored_when_disabled_or_admin_called(settings: Setti
     ):
         reply = message(13, sender=user(BOT_ID, is_bot=True), caller_user=user(CALLER_ID))
         await guestbot.block_guest_reply(context, guestbot.GuestBotState(), context.client, reply)
-        reply.delete.assert_not_awaited()
+        context.client.delete_messages.assert_not_awaited()
         context.client.ban_chat_member.assert_not_awaited()
 
 
@@ -123,7 +133,7 @@ async def test_guest_reply_from_anonymous_admin_or_linked_channel_is_ignored(set
         context = make_context(settings)
         reply = message(13, sender=user(BOT_ID, is_bot=True), caller_chat=caller_chat)
         await guestbot.block_guest_reply(context, guestbot.GuestBotState(), context.client, reply)
-        reply.delete.assert_not_awaited()
+        context.client.delete_messages.assert_not_awaited()
         context.client.ban_chat_member.assert_not_awaited()
 
 
@@ -132,10 +142,11 @@ async def test_guest_reply_from_other_channel_bans_channel(settings: Settings, m
     monkeypatch.setattr(guestbot, "send_log", AsyncMock())
     context = make_context(settings)
     channel = SimpleNamespace(id=-100555, title="Spam channel", username=None)
-    reply = message(21, sender=user(BOT_ID, is_bot=True), caller_chat=channel)
+    summon = SimpleNamespace(id=20, sender_chat=channel, from_user=user(136817688))
+    reply = message(21, sender=user(BOT_ID, is_bot=True), caller_chat=channel, reply_to=summon)
     await guestbot.block_guest_reply(context, guestbot.GuestBotState(), context.client, reply)
     context.client.ban_chat_member.assert_any_await(CHAT_ID, -100555)
-    reply.delete.assert_awaited_once()
+    context.client.delete_messages.assert_awaited_once_with(CHAT_ID, [21, 20])
 
 
 @pytest.mark.asyncio
@@ -144,8 +155,12 @@ async def test_guest_reply_reports_missing_rights(settings: Settings, monkeypatc
     monkeypatch.setattr(guestbot, "send_log", AsyncMock(side_effect=lambda _ctx, text, **_kw: logs.append(text)))
     context = make_context(settings, caller_status=None)
     context.client.ban_chat_member.side_effect = ChatAdminRequired()
-    reply = message(13, sender=user(BOT_ID, is_bot=True), caller_user=user(CALLER_ID))
-    reply.delete.side_effect = MessageDeleteForbidden()
+    # 引用的是别人的消息，不删
+    reply = message(
+        13, sender=user(BOT_ID, is_bot=True), caller_user=user(CALLER_ID), reply_to=message(9, sender=user(7))
+    )
+    context.client.delete_messages.side_effect = MessageDeleteForbidden()
     await guestbot.block_guest_reply(context, guestbot.GuestBotState(), context.client, reply)
     assert "Bot 无权封禁" in logs[0] and "删除回复失败" in logs[0]
+    context.client.delete_messages.assert_awaited_once_with(CHAT_ID, [13])
     context.client.send_message.assert_not_awaited()

@@ -1,5 +1,5 @@
 """拦截群外 guest bot：有人 @ 不在群里的 bot 让它代发消息(Bot API 10.0 Guest Mode)时，
-删除 bot 的回复、封禁召唤者，同时尝试封禁该 bot。
+删除 bot 的回复和召唤消息、封禁召唤者，同时尝试封禁该 bot。
 
 Bot 需要在 BotFather 打开 Bot-to-Bot Communication Mode 并且是群管理员，才能收到 guest bot 的回复。
 """
@@ -79,6 +79,17 @@ async def _caller_exempt(client: Client, chat_id: int, user: User | None, chat: 
         return False
 
 
+def _to_delete(message: Message, caller_id: int) -> list[int]:
+    """guest bot 的回复会引用召唤消息(@ bot 的那条)，是召唤者发的就一起删。"""
+    ids = [message.id]
+    summon = message.reply_to_message
+    if summon is not None:
+        sender = summon.sender_chat or summon.from_user
+        if sender is not None and sender.id == caller_id:
+            ids.append(summon.id)
+    return ids
+
+
 async def _ban(client: Client, chat_id: int, target_id: int) -> str | None:
     try:
         await client.ban_chat_member(chat_id, target_id)
@@ -103,7 +114,7 @@ async def block_guest_reply(context: AppContext, state: GuestBotState, client: C
         return
     bot = message.from_user
     try:
-        await message.delete()
+        await client.delete_messages(chat_id, _to_delete(message, caller_id))
         deleted = True
     except RPCError:
         logger.info("failed to delete guest bot reply", extra={"chat_id": chat_id})

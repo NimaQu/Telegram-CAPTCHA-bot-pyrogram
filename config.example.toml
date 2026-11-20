@@ -66,7 +66,7 @@ delete_failed_challenge_interval = 15
 enable_global_blacklist = true
 # 网页验证时拒绝命中 IP 封锁规则的访问者，群管理员可在配置面板里关闭
 enable_ip_reputation = true
-# 群里有人召唤不在群里的 guest bot 时，删除 bot 的回复、封禁召唤者，同时尝试封禁该 bot
+# 群里有人召唤不在群里的 guest bot 时，删除 bot 的回复和召唤消息、封禁召唤者，同时尝试封禁该 bot
 block_guest_bots = true
 global_timeout_user_blacklist_remove = 600
 

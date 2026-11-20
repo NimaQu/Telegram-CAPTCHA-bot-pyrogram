@@ -151,8 +151,8 @@ uv run captcha-bot update-asn --config config.toml
 
 Bot API 10.0 起，用户可以在群里 @ 一个不在群里的 bot（Guest Mode），由它代发一条回复，目前主要被用来刷广告。Bot 收到带召唤者（`guest_bot_caller_user` / `guest_bot_caller_chat`）的 guest 回复时：
 
-1. 删除这条回复；
-2. 封禁召唤者（频道身份就封该频道）。Bot 不能调用 `deleteParticipantHistory`，召唤者之前的消息不会被删除；
+1. 删除这条回复，以及它引用的召唤消息（@ bot 的那条）；
+2. 封禁召唤者（频道身份就封该频道）。Bot 不能调用 `deleteParticipantHistory`，召唤者的其他消息不会被删除；
 3. 尝试封禁该 bot；
 4. 召唤者是群管理员、匿名管理员或本群关联频道时不处理。
 
